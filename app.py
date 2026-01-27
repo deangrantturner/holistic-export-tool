@@ -12,8 +12,6 @@ import os
 def init_db():
     conn = sqlite3.connect('invoices.db')
     c = conn.cursor()
-    
-    # 1. History Table
     c.execute('''CREATE TABLE IF NOT EXISTS invoice_history_v2
                  (id INTEGER PRIMARY KEY AUTOINCREMENT,
                   invoice_number TEXT,
@@ -24,41 +22,41 @@ def init_db():
                   pdf_po BLOB,
                   pdf_si BLOB)''')
     
-    # 2. Catalog Table
     c.execute('''CREATE TABLE IF NOT EXISTS product_catalog_v3
                  (sku TEXT PRIMARY KEY,
                   product_name TEXT,
                   description TEXT,
                   hts_code TEXT,
                   fda_code TEXT)''')
-
-    # 3. Settings Table (For Signature)
+                  
     c.execute('''CREATE TABLE IF NOT EXISTS settings
                  (key TEXT PRIMARY KEY,
                   value BLOB)''')
-                  
     conn.commit()
     conn.close()
 
 # --- DB Functions ---
 def save_invoice_to_db(inv_num, total_val, buyer, pdf_ci, pdf_po, pdf_si):
-    conn = sqlite3.connect('invoices.db')
-    c = conn.cursor()
-    c.execute("SELECT id FROM invoice_history_v2 WHERE invoice_number=?", (inv_num,))
-    exists = c.fetchone()
-    
-    if exists:
-        c.execute("""UPDATE invoice_history_v2 
-                     SET total_value=?, buyer_name=?, pdf_ci=?, pdf_po=?, pdf_si=?
-                     WHERE invoice_number=?""",
-                  (total_val, buyer, pdf_ci, pdf_po, pdf_si, inv_num))
-    else:
-        c.execute("""INSERT INTO invoice_history_v2 
-                     (invoice_number, date_created, total_value, buyer_name, pdf_ci, pdf_po, pdf_si) 
-                     VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                  (inv_num, date.today(), total_val, buyer, pdf_ci, pdf_po, pdf_si))
-    conn.commit()
-    conn.close()
+    try:
+        conn = sqlite3.connect('invoices.db')
+        c = conn.cursor()
+        c.execute("SELECT id FROM invoice_history_v2 WHERE invoice_number=?", (inv_num,))
+        exists = c.fetchone()
+        
+        if exists:
+            c.execute("""UPDATE invoice_history_v2 
+                         SET total_value=?, buyer_name=?, pdf_ci=?, pdf_po=?, pdf_si=?
+                         WHERE invoice_number=?""",
+                      (total_val, buyer, pdf_ci, pdf_po, pdf_si, inv_num))
+        else:
+            c.execute("""INSERT INTO invoice_history_v2 
+                         (invoice_number, date_created, total_value, buyer_name, pdf_ci, pdf_po, pdf_si) 
+                         VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                      (inv_num, date.today(), total_val, buyer, pdf_ci, pdf_po, pdf_si))
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass 
 
 def get_history():
     conn = sqlite3.connect('invoices.db')
@@ -74,7 +72,6 @@ def get_documents_from_db(invoice_number):
     conn.close()
     return data if data else (None, None, None)
 
-# --- Catalog Functions ---
 def get_catalog():
     conn = sqlite3.connect('invoices.db')
     df = pd.read_sql_query("SELECT * FROM product_catalog_v3", conn)
@@ -123,10 +120,24 @@ init_db()
 
 # --- Page Config ---
 st.set_page_config(page_title="Holistic Roasters Export Hub", layout="wide")
+
+# --- CUSTOM CSS FOR STICKY TABS ---
+st.markdown("""
+    <style>
+        div[data-testid="stTabs"] {
+            position: sticky;
+            top: 0;
+            background-color: white;
+            z-index: 999;
+            padding-top: 10px;
+        }
+    </style>
+""", unsafe_allow_html=True)
+
 st.title("☕ Holistic Roasters Export Hub")
 
 # --- Tabs ---
-tab_generate, tab_catalog, tab_history = st.tabs(["📝 Generate Documents", "📦 Product Catalog", "VX Archive History"])
+tab_generate, tab_catalog, tab_history = st.tabs(["📝 Generate Documents", "📦 Product Catalog", "🗄️ Documents Archive"])
 
 # --- DEFAULT DATA ---
 DEFAULT_SHIPPER = """Holistic Roasters inc.
@@ -286,7 +297,7 @@ def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship,
         try:
             pdf.image(tmp_path, w=40)
         except:
-            pdf.cell(0, 5, "[Signature Image Error]", 0, 1)
+            pdf.cell(0, 5, "[Signature Error]", 0, 1)
         os.unlink(tmp_path)
     else:
         pdf.ln(15)
@@ -307,37 +318,38 @@ with tab_generate:
             inv_date = st.date_input("Date", value=date.today())
             discount_rate = st.number_input("Target Transfer Discount %", min_value=0.0, max_value=100.0, value=50.0, step=0.1, format="%.1f")
             
-            # --- SIGNATURE SECTION ---
+            # --- SIGNATURE SECTION (Side-by-Side) ---
             st.markdown("---")
-            st.markdown("#### Signature")
+            st.markdown("#### Signature Settings")
             
-            # Name Input
-            signer_name = st.text_input("Signatory Name", value="Dean Turner")
-
-            # Load Saved Signature from DB
-            saved_sig = get_signature()
-            if saved_sig:
-                st.success("✅ Signature Loaded from Database")
-                # Option to clear or replace
-                if st.button("Clear Saved Signature"):
-                    conn = sqlite3.connect('invoices.db')
-                    conn.execute("DELETE FROM settings WHERE key='signature'")
-                    conn.commit()
-                    conn.close()
+            sig_col_a, sig_col_b = st.columns(2)
+            
+            with sig_col_a:
+                # Name Input
+                signer_name = st.text_input("Signatory Name", value="Dean Turner")
+                
+                # Check status
+                saved_sig = get_signature()
+                if saved_sig:
+                    st.success("✅ Signature on file")
+                    if st.button("Clear Signature", size="small"):
+                        conn = sqlite3.connect('invoices.db')
+                        conn.execute("DELETE FROM settings WHERE key='signature'")
+                        conn.commit()
+                        conn.close()
+                        st.rerun()
+                else:
+                    st.warning("⚠️ No signature")
+            
+            with sig_col_b:
+                # Upload Button
+                sig_upload = st.file_uploader("Upload New (PNG/JPG)", type=['png', 'jpg', 'jpeg'], key="sig_upl")
+                if sig_upload:
+                    bytes_data = sig_upload.getvalue()
+                    save_signature(bytes_data)
+                    st.success("Saved!")
                     st.rerun()
-            else:
-                st.warning("⚠️ No signature saved.")
-            
-            # Upload New Signature
-            sig_upload = st.file_uploader("Upload New Signature", type=['png', 'jpg', 'jpeg'], key="sig_upl")
-            if sig_upload:
-                # Save immediately to DB
-                bytes_data = sig_upload.getvalue()
-                save_signature(bytes_data)
-                st.success("Signature Saved! It will persist now.")
-                st.rerun()
-            
-            # Determine which bytes to use
+
             final_sig_bytes = saved_sig if saved_sig else (sig_upload.getvalue() if sig_upload else None)
             
         with c2:
@@ -385,14 +397,16 @@ with tab_generate:
                     processed['Final HTS'] = DEFAULT_HTS
                     processed['Final FDA'] = DEFAULT_FDA
                 
-                # --- MATH ---
+                # --- MATH: ORIGINAL RETAIL & DISCOUNT ---
                 processed['Discount_Float'] = processed['Discount'].astype(str).str.replace('%', '', regex=False)
                 processed['Discount_Float'] = pd.to_numeric(processed['Discount_Float'], errors='coerce').fillna(0) / 100.0
                 
+                # Calculate True Retail Price (Backing out any promo discounts)
                 processed['Original_Retail'] = processed.apply(
                     lambda row: row['Price per unit'] / (1 - row['Discount_Float']) if row['Discount_Float'] < 1.0 else 0, axis=1
                 )
                 
+                # Calculate Transfer Price from True Retail
                 app_discount_decimal = discount_rate / 100.0
                 processed['Transfer Price (Unit)'] = processed['Original_Retail'] * (1 - app_discount_decimal)
                 processed['Transfer Total'] = processed['Quantity'] * processed['Transfer Price (Unit)']
@@ -424,37 +438,29 @@ with tab_generate:
                     num_rows="dynamic"
                 )
                 total_val = edited_df['Transfer Total'].sum()
-
-                # --- AUTO-GENERATE ALL DOCS FOR DOWNLOAD ---
+                
+                # --- AUTO-GENERATE & SAVE ---
                 pdf_ci = generate_pdf("COMMERCIAL INVOICE", edited_df, inv_number, inv_date, 
                                       shipper_txt, importer_txt, consignee_txt, notes_txt, total_val, final_sig_bytes, signer_name)
                 pdf_po = generate_pdf("PURCHASE ORDER", edited_df, inv_number, inv_date, 
                                       importer_txt, shipper_txt, consignee_txt, notes_txt, total_val, final_sig_bytes, signer_name)
                 pdf_si = generate_pdf("SALES INVOICE", edited_df, inv_number, inv_date, 
                                       shipper_txt, importer_txt, consignee_txt, notes_txt, total_val, final_sig_bytes, signer_name)
-
-                # --- AUTO-SAVE FUNCTION ---
-                # We save every time the PDF is generated (which happens on every refresh/edit). 
-                # This ensures the DB is always in sync with what is on screen.
-                # However, to avoid spamming the DB on every keystroke, we can save only on download click callback.
                 
-                def auto_save_callback():
-                    save_invoice_to_db(inv_number, total_val, importer_txt.split('\n')[0], pdf_ci, pdf_po, pdf_si)
-                    # We don't show a success message here to avoid interrupting the download flow, 
-                    # but the data is safely stored.
+                # Auto-save immediately upon generation
+                save_invoice_to_db(inv_number, total_val, importer_txt.split('\n')[0], pdf_ci, pdf_po, pdf_si)
 
-                # --- DOWNLOAD BUTTONS ---
-                st.subheader("🖨️ Download Documents (Auto-Saves to History)")
+                # --- DOWNLOADS ---
+                st.subheader("🖨️ Download Documents")
+                st.caption("✅ Documents are automatically saved to history.")
                 col_d1, col_d2, col_d3 = st.columns(3)
 
                 with col_d1:
-                    st.download_button("📄 Commercial Invoice", pdf_ci, f"CI-{inv_number}.pdf", "application/pdf", on_click=auto_save_callback)
+                    st.download_button("📄 Download Commercial Invoice", pdf_ci, file_name=f"CI-{inv_number}.pdf", mime="application/pdf")
                 with col_d2:
-                    st.download_button("📄 Purchase Order", pdf_po, f"PO-{inv_number}.pdf", "application/pdf", on_click=auto_save_callback)
+                    st.download_button("📄 Download Purchase Order", pdf_po, file_name=f"PO-{inv_number}.pdf", mime="application/pdf")
                 with col_d3:
-                    st.download_button("📄 Sales Invoice", pdf_si, f"SI-{inv_number}.pdf", "application/pdf", on_click=auto_save_callback)
-                
-                st.success(f"✅ Ready. Downloading any file will automatically save Invoice #{inv_number} to the archive.")
+                    st.download_button("📄 Download Sales Invoice", pdf_si, file_name=f"SI-{inv_number}.pdf", mime="application/pdf")
 
         except Exception as e:
             st.error(f"Processing Error: {e}")
@@ -465,15 +471,18 @@ with tab_catalog:
     st.markdown("Auto-fill details by SKU.")
     
     col_tools1, col_tools2, col_tools3 = st.columns(3)
+    
     with col_tools1:
         template_df = pd.DataFrame(columns=['sku', 'product_name', 'description', 'hts_code', 'fda_code'])
         csv_template = template_df.to_csv(index=False).encode('utf-8')
         st.download_button("📥 Download Empty Template", csv_template, "catalog_template.csv", "text/csv")
+    
     with col_tools2:
         current_catalog = get_catalog()
         if not current_catalog.empty:
             csv_current = current_catalog.to_csv(index=False).encode('utf-8')
             st.download_button("📥 Download Current Catalog", csv_current, "full_catalog.csv", "text/csv")
+    
     with col_tools3:
         if st.button("⚠️ Clear Entire Catalog"):
             clear_catalog()
@@ -505,7 +514,7 @@ with tab_catalog:
 
 # ================= TAB 3: HISTORY =================
 with tab_history:
-    st.header("🗄️ Invoice Archive")
+    st.header("🗄️ Documents Archive")
     history_df = get_history()
     st.dataframe(history_df, use_container_width=True)
     inv_list = history_df['invoice_number'].unique()
