@@ -1,107 +1,166 @@
 import streamlit as st
 import pandas as pd
-import io
+from fpdf import FPDF
 from datetime import date
 
-# --- Page Setup ---
+# --- Configuration ---
 st.set_page_config(page_title="Holistic Roasters Export Tool", layout="centered")
 st.title("☕ Holistic Roasters Export Tool")
-st.markdown("Upload the daily Sales Order CSV to generate US Customs & Intercompany documents.")
+st.markdown("Upload the daily Sales Order CSV to generate US Customs & Intercompany PDFs.")
 
-# --- Sidebar: Inputs ---
+# --- Sidebar ---
 st.sidebar.header("Configuration")
 uploaded_file = st.sidebar.file_uploader("Upload CSV File", type=['csv'])
 discount_rate_percent = st.sidebar.slider("Intercompany Discount (%)", min_value=0, max_value=100, value=50, step=1)
 
-# --- Processing Logic ---
-def process_data(df, discount_pct):
-    # Filter for United States
-    # We use strict matching. Ensure your CSV always uses "United States"
-    us_shipments = df[df['Ship to country'] == 'United States'].copy()
+# Document Addresses
+SENDER_CA = "Holistic Roasters Canada\n123 Roastery Lane\nMontreal, QC, Canada"
+ENTITY_US = "Holistic Roasters USA\n456 Warehouse Blvd\nNew York, NY, USA"
 
-    # Filter for Products (exclude shipping fees/services if listed as non-products)
+# --- PDF Generation Class ---
+class PDF(FPDF):
+    def header(self):
+        self.set_font('Helvetica', 'B', 14)
+        self.cell(0, 10, 'Holistic Roasters', 0, 1, 'C')
+        self.ln(5)
+
+    def footer(self):
+        self.set_y(-15)
+        self.set_font('Helvetica', 'I', 8)
+        self.cell(0, 10, f'Page {self.page_no()}', 0, 0, 'C')
+
+def create_pdf(dataframe, doc_title, sender_text, receiver_text, total_value):
+    pdf = PDF()
+    pdf.add_page()
+    pdf.set_auto_page_break(auto=True, margin=15)
+    
+    # Title & Date
+    pdf.set_font("Helvetica", 'B', 16)
+    pdf.cell(0, 10, doc_title, 0, 1, 'R')
+    pdf.set_font("Helvetica", '', 10)
+    pdf.cell(0, 5, f"Date: {date.today()}", 0, 1, 'R')
+    pdf.ln(10)
+
+    # Addresses (Side by Side)
+    col_width = 90
+    pdf.set_font("Helvetica", 'B', 10)
+    pdf.cell(col_width, 5, "FROM:", 0, 0)
+    pdf.cell(col_width, 5, "TO:", 0, 1)
+    
+    pdf.set_font("Helvetica", '', 10)
+    y_start = pdf.get_y()
+    
+    pdf.multi_cell(col_width, 5, sender_text) # Left
+    y_end_left = pdf.get_y()
+    
+    pdf.set_xy(10 + col_width, y_start) # Move to Right
+    pdf.multi_cell(col_width, 5, receiver_text)
+    y_end_right = pdf.get_y()
+    
+    pdf.set_y(max(y_end_left, y_end_right) + 10)
+
+    # Table Header
+    pdf.set_font("Helvetica", 'B', 10)
+    pdf.set_fill_color(220, 220, 220)
+    pdf.cell(30, 8, "SKU", 1, 0, 'C', fill=True)
+    pdf.cell(90, 8, "Description", 1, 0, 'C', fill=True)
+    pdf.cell(20, 8, "Qty", 1, 0, 'C', fill=True)
+    pdf.cell(25, 8, "Price", 1, 0, 'C', fill=True)
+    pdf.cell(25, 8, "Total", 1, 1, 'C', fill=True)
+
+    # Table Rows
+    pdf.set_font("Helvetica", '', 10)
+    for _, row in dataframe.iterrows():
+        desc = str(row['Item variant'])
+        if len(desc) > 50: desc = desc[:47] + "..." # Truncate long names
+            
+        pdf.cell(30, 8, str(row['Variant code / SKU']), 1)
+        pdf.cell(90, 8, desc, 1)
+        pdf.cell(20, 8, str(int(row['Quantity'])), 1, 0, 'C')
+        pdf.cell(25, 8, f"${row['Transfer Price (Unit)']:.2f}", 1, 0, 'R')
+        pdf.cell(25, 8, f"${row['Transfer Total']:.2f}", 1, 1, 'R')
+
+    # Totals
+    pdf.ln(5)
+    pdf.set_font("Helvetica", 'B', 12)
+    pdf.cell(165, 10, "Total (USD):", 0, 0, 'R')
+    pdf.cell(25, 10, f"${total_value:.2f}", 0, 1, 'R')
+    
+    return pdf.output() # Returns PDF bytes
+
+# --- Logic ---
+def process_data(df, discount_pct):
+    # Filter US & Products
+    us_shipments = df[df['Ship to country'] == 'United States'].copy()
     if 'Item type' in df.columns:
         us_shipments = us_shipments[us_shipments['Item type'] == 'product']
 
-    # Select columns relevant for invoicing
-    # Adjust these names if your CSV headers change in the future
-    cols_to_keep = ['Variant code / SKU', 'Item variant', 'Quantity', 'Price per unit']
-    processed = us_shipments[cols_to_keep].copy()
-
-    # Calculations
-    discount_decimal = discount_pct / 100.0
-    processed['Retail Total'] = processed['Quantity'] * processed['Price per unit']
-    processed['Transfer Price (Unit)'] = processed['Price per unit'] * (1 - discount_decimal)
+    # Select & Calculate
+    cols = ['Variant code / SKU', 'Item variant', 'Quantity', 'Price per unit']
+    processed = us_shipments[cols].copy()
+    
+    processed['Transfer Price (Unit)'] = processed['Price per unit'] * (1 - discount_pct/100.0)
     processed['Transfer Total'] = processed['Quantity'] * processed['Transfer Price (Unit)']
-
-    # Consolidate by SKU (Combine multiple orders of the same coffee)
+    
+    # Consolidate
     consolidated = processed.groupby(['Variant code / SKU', 'Item variant']).agg({
         'Quantity': 'sum',
-        'Transfer Price (Unit)': 'mean', # Average to handle potential minor price variances
+        'Transfer Price (Unit)': 'mean',
         'Transfer Total': 'sum'
     }).reset_index()
+    
+    return consolidated
 
-    # Rounding for clean currency display
-    consolidated['Transfer Price (Unit)'] = consolidated['Transfer Price (Unit)'].round(2)
-    consolidated['Transfer Total'] = consolidated['Transfer Total'].round(2)
-
-    return consolidated, us_shipments
-
-# --- App Execution ---
-if uploaded_file is not None:
+# --- Main App Interface ---
+if uploaded_file:
     try:
         df = pd.read_csv(uploaded_file)
-
-        # Check if required columns exist before crashing
-        required_cols = ['Ship to country', 'Variant code / SKU', 'Item variant', 'Quantity', 'Price per unit']
-        if not all(col in df.columns for col in required_cols):
-            st.error(f"Error: The uploaded CSV is missing one of these required columns: {required_cols}")
+        
+        if 'Ship to country' not in df.columns:
+            st.error("Error: CSV missing 'Ship to country' column.")
         else:
-            # Run the processor
-            invoice_data, raw_log = process_data(df, discount_rate_percent)
+            invoice_data = process_data(df, discount_rate_percent)
+            total_val = invoice_data['Transfer Total'].sum()
+            
+            st.success("✅ Data Processed Successfully!")
+            st.metric("Total Transfer Value", f"${total_val:,.2f}")
+            
+            # Show Preview
+            with st.expander("See Invoice Data Preview"):
+                st.dataframe(invoice_data.style.format({"Transfer Price (Unit)": "${:.2f}", "Transfer Total": "${:.2f}"}))
 
-            # Show results on screen
-            st.success(f"Success! Found {len(raw_log)} line items for the United States.")
+            # Generate PDFs in memory
+            pdf_po = create_pdf(invoice_data, "PURCHASE ORDER", ENTITY_US, SENDER_CA, total_val)
+            pdf_ci = create_pdf(invoice_data, "COMMERCIAL INVOICE", SENDER_CA, ENTITY_US, total_val)
+            pdf_si = create_pdf(invoice_data, "SALES INVOICE", SENDER_CA, ENTITY_US, total_val)
 
-            # Metrics
+            # --- Display Download Buttons (3 Separate Buttons) ---
+            st.subheader("Download Documents")
             col1, col2, col3 = st.columns(3)
-            col1.metric("Total Qty", int(invoice_data['Quantity'].sum()))
-            col2.metric("Transfer Value (USD)", f"${invoice_data['Transfer Total'].sum():,.2f}")
-            col3.metric("Discount Used", f"{discount_rate_percent}%")
+            
+            with col1:
+                st.download_button(
+                    label="📄 Purchase Order",
+                    data=pdf_po,
+                    file_name=f"Purchase_Order_{date.today()}.pdf",
+                    mime="application/pdf"
+                )
+            
+            with col2:
+                st.download_button(
+                    label="📄 Commercial Invoice",
+                    data=pdf_ci,
+                    file_name=f"Commercial_Invoice_{date.today()}.pdf",
+                    mime="application/pdf"
+                )
 
-            st.subheader("Preview: Consolidated Invoice Data")
-            st.dataframe(invoice_data.style.format({"Transfer Price (Unit)": "${:.2f}", "Transfer Total": "${:.2f}"}))
-
-            # Generate Excel File in memory
-            output = io.BytesIO()
-            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                workbook = writer.book
-                money_fmt = workbook.add_format({'num_format': '$#,##0.00'})
-
-                # Sheet 1: Commercial Invoice
-                ci_sheet = invoice_data.copy()
-                ci_sheet['Country of Origin'] = 'Canada' 
-                ci_sheet.to_excel(writer, sheet_name='Commercial Invoice', index=False)
-                writer.sheets['Commercial Invoice'].set_column('C:E', 18, money_fmt)
-
-                # Sheet 2: Purchase Order
-                invoice_data.to_excel(writer, sheet_name='Purchase Order', index=False)
-
-                # Sheet 3: Sales Invoice
-                invoice_data.to_excel(writer, sheet_name='Sales Invoice', index=False)
-
-                # Sheet 4: Raw Data (Audit Trail)
-                raw_log.to_excel(writer, sheet_name='Audit Trail', index=False)
-
-            # Download Button
-            st.download_button(
-                label="📥 Download Completed Excel File",
-                data=output.getvalue(),
-                file_name=f"Holistic_US_Transfer_{date.today()}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
+            with col3:
+                st.download_button(
+                    label="📄 Sales Invoice",
+                    data=pdf_si,
+                    file_name=f"Sales_Invoice_{date.today()}.pdf",
+                    mime="application/pdf"
+                )
 
     except Exception as e:
-        st.error(f"An error occurred processing the file: {e}")
-else:
-    st.info("👈 Please upload your CSV file in the sidebar to begin.")
+        st.error(f"An error occurred: {e}")
