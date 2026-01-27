@@ -2,11 +2,12 @@ import streamlit as st
 import pandas as pd
 import sqlite3
 from fpdf import FPDF
-from datetime import date, datetime
+from datetime import datetime, date
 import io
 import re
 import tempfile
 import os
+import pytz  # For EST Timezone
 
 # --- Database Setup (SQLite) ---
 def init_db():
@@ -36,22 +37,42 @@ def init_db():
     conn.close()
 
 # --- DB Functions ---
-def save_invoice_to_db(inv_num, total_val, buyer, pdf_ci, pdf_po, pdf_si):
+def save_invoice_to_db(base_inv_num, total_val, buyer, pdf_ci, pdf_po, pdf_si):
     try:
         conn = sqlite3.connect('invoices.db')
         c = conn.cursor()
         
-        # Always INSERT a new record with a precise timestamp
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+        # 1. VERSION CONTROL LOGIC
+        # Find all existing invoice numbers that start with this base number
+        # We look for exact match OR match with a hyphen suffix (e.g. INV-001-1)
+        c.execute("SELECT invoice_number FROM invoice_history_v2 WHERE invoice_number LIKE ?", (base_inv_num + '%',))
+        existing_nums = [row[0] for row in c.fetchall()]
         
+        # Calculate next version
+        count = 0
+        for num in existing_nums:
+            # Check if it matches pattern "INV-XXX" or "INV-XXX-{digit}"
+            if num == base_inv_num:
+                count += 1
+            elif num.startswith(base_inv_num + "-"):
+                count += 1
+        
+        # The new unique ID for the archive
+        new_version_num = f"{base_inv_num}-{count + 1}"
+        
+        # 2. EST TIMESTAMP LOGIC
+        est = pytz.timezone('US/Eastern')
+        timestamp = datetime.now(est).strftime("%Y-%m-%d %H:%M EST")
+        
+        # 3. SAVE
         c.execute("""INSERT INTO invoice_history_v2 
                      (invoice_number, date_created, total_value, buyer_name, pdf_ci, pdf_po, pdf_si) 
                      VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                  (inv_num, timestamp, total_val, buyer, pdf_ci, pdf_po, pdf_si))
+                  (new_version_num, timestamp, total_val, buyer, pdf_ci, pdf_po, pdf_si))
         conn.commit()
         conn.close()
-    except Exception:
-        pass 
+    except Exception as e:
+        print(f"Auto-save error: {e}")
 
 def get_history():
     conn = sqlite3.connect('invoices.db')
@@ -320,11 +341,10 @@ with tab_generate:
             consignee_txt = st.text_area("Consignee (Ship To)", value=DEFAULT_CONSIGNEE, height=120)
             notes_txt = st.text_area("Notes / Broker", value=DEFAULT_NOTES, height=100)
 
-        # --- SIGNATURE SECTION (Now Full Width at Bottom) ---
+        # --- SIGNATURE SECTION ---
         st.markdown("---")
         st.markdown("#### Signature Settings")
         
-        # New Layout: Split into 2 equal columns spanning the full width
         sig_col_a, sig_col_b = st.columns(2)
         
         with sig_col_a:
@@ -335,7 +355,7 @@ with tab_generate:
             saved_sig = get_signature()
             if saved_sig:
                 st.success("✅ Signature on file")
-                if st.button("Clear Signature"): # Removed size="small" to fix error
+                if st.button("Clear Signature"):
                     conn = sqlite3.connect('invoices.db')
                     conn.execute("DELETE FROM settings WHERE key='signature'")
                     conn.commit()
@@ -443,7 +463,7 @@ with tab_generate:
                 pdf_si = generate_pdf("SALES INVOICE", edited_df, inv_number, inv_date, 
                                       shipper_txt, importer_txt, consignee_txt, notes_txt, total_val, final_sig_bytes, signer_name)
                 
-                # Auto-save immediately upon generation
+                # Auto-save logic handles the versioning now (does not block download)
                 save_invoice_to_db(inv_number, total_val, importer_txt.split('\n')[0], pdf_ci, pdf_po, pdf_si)
 
                 # --- DOWNLOADS ---
