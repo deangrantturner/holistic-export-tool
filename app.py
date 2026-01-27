@@ -8,20 +8,22 @@ import re
 import tempfile
 import os
 import pytz
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.mime.application import MIMEApplication
 
 # --- Database Setup (SQLite) ---
 def init_db():
     conn = sqlite3.connect('invoices.db')
     c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS invoice_history_v2
+    # Simplified history table (metadata only for now)
+    c.execute('''CREATE TABLE IF NOT EXISTS invoice_history_v3
                  (id INTEGER PRIMARY KEY AUTOINCREMENT,
                   invoice_number TEXT,
                   date_created TEXT,
                   total_value REAL,
-                  buyer_name TEXT,
-                  pdf_ci BLOB,
-                  pdf_po BLOB,
-                  pdf_si BLOB)''')
+                  buyer_name TEXT)''')
     
     c.execute('''CREATE TABLE IF NOT EXISTS product_catalog_v3
                  (sku TEXT PRIMARY KEY,
@@ -37,72 +39,41 @@ def init_db():
     conn.close()
 
 # --- DB Functions ---
-def save_invoice_callback(base_inv_num, total_val, buyer):
-    """
-    Callback to save invoice. Retreives PDFs directly from Session State
-    to ensure data integrity.
-    """
+def save_invoice_metadata(inv_num, total_val, buyer):
+    """Saves just the record that an invoice was generated."""
     try:
-        # Retrieve binary data from session state
-        pdf_ci = st.session_state.get('current_pdf_ci')
-        pdf_po = st.session_state.get('current_pdf_po')
-        pdf_si = st.session_state.get('current_pdf_si')
-
-        if not pdf_ci or not pdf_po or not pdf_si:
-            st.error("⚠️ Save Failed: PDF data was missing from session.")
-            return
-
         conn = sqlite3.connect('invoices.db')
         c = conn.cursor()
         
-        # 1. Versioning Logic
-        c.execute("SELECT invoice_number FROM invoice_history_v2 WHERE invoice_number LIKE ?", (base_inv_num + '%',))
+        # Versioning Logic
+        c.execute("SELECT invoice_number FROM invoice_history_v3 WHERE invoice_number LIKE ?", (inv_num + '%',))
         existing_nums = [row[0] for row in c.fetchall()]
         
         count = 0
         for num in existing_nums:
-            if num == base_inv_num:
-                count += 1
-            elif num.startswith(base_inv_num + "-"):
-                count += 1
+            if num == inv_num: count += 1
+            elif num.startswith(inv_num + "-"): count += 1
         
-        if count == 0:
-            new_version_num = base_inv_num 
-        else:
-            new_version_num = f"{base_inv_num}-{count}"
+        new_version_num = inv_num if count == 0 else f"{inv_num}-{count}"
         
-        # 2. Timestamp (EST)
         est = pytz.timezone('US/Eastern')
         timestamp = datetime.now(est).strftime("%Y-%m-%d %H:%M EST")
         
-        # 3. Insert using sqlite3.Binary to ensure BLOB storage
-        c.execute("""INSERT INTO invoice_history_v2 
-                     (invoice_number, date_created, total_value, buyer_name, pdf_ci, pdf_po, pdf_si) 
-                     VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                  (new_version_num, timestamp, total_val, buyer, 
-                   sqlite3.Binary(pdf_ci), 
-                   sqlite3.Binary(pdf_po), 
-                   sqlite3.Binary(pdf_si)))
+        c.execute("""INSERT INTO invoice_history_v3 
+                     (invoice_number, date_created, total_value, buyer_name) 
+                     VALUES (?, ?, ?, ?)""",
+                  (new_version_num, timestamp, total_val, buyer))
         conn.commit()
         conn.close()
-        st.toast(f"✅ Archived as {new_version_num}")
-        
-    except Exception as e:
-        st.error(f"Database Error: {e}")
+        return new_version_num
+    except Exception:
+        return inv_num
 
 def get_history():
     conn = sqlite3.connect('invoices.db')
-    df = pd.read_sql_query("SELECT id, invoice_number, date_created, buyer_name, total_value FROM invoice_history_v2 ORDER BY id DESC", conn)
+    df = pd.read_sql_query("SELECT invoice_number, date_created, buyer_name, total_value FROM invoice_history_v3 ORDER BY id DESC", conn)
     conn.close()
     return df
-
-def get_documents_by_id(record_id):
-    conn = sqlite3.connect('invoices.db')
-    c = conn.cursor()
-    c.execute("SELECT pdf_ci, pdf_po, pdf_si FROM invoice_history_v2 WHERE id=?", (record_id,))
-    data = c.fetchone()
-    conn.close()
-    return data if data else (None, None, None)
 
 def get_catalog():
     conn = sqlite3.connect('invoices.db')
@@ -147,12 +118,39 @@ def get_signature():
     conn.close()
     return data[0] if data else None
 
+# --- Email Function ---
+def send_email_with_attachments(sender_email, sender_password, recipient_email, subject, body, files):
+    """
+    Sends an email with PDF attachments.
+    files: list of dicts {'name': 'filename.pdf', 'data': bytes}
+    """
+    msg = MIMEMultipart()
+    msg['From'] = sender_email
+    msg['To'] = recipient_email
+    msg['Subject'] = subject
+    msg.attach(MIMEText(body, 'plain'))
+
+    for f in files:
+        part = MIMEApplication(f['data'], Name=f['name'])
+        part['Content-Disposition'] = f'attachment; filename="{f["name"]}"'
+        msg.attach(part)
+
+    try:
+        # Defaulting to Gmail/Google Workspace settings
+        server = smtplib.SMTP('smtp.gmail.com', 587)
+        server.starttls()
+        server.login(sender_email, sender_password)
+        server.sendmail(sender_email, recipient_email, msg.as_string())
+        server.quit()
+        return True, "Email sent successfully!"
+    except Exception as e:
+        return False, str(e)
+
 init_db()
 
 # --- Page Config ---
 st.set_page_config(page_title="Holistic Roasters Export Hub", layout="wide")
 
-# --- CUSTOM CSS ---
 st.markdown("""
     <style>
         div[data-testid="stTabs"] {
@@ -167,7 +165,6 @@ st.markdown("""
 
 st.title("☕ Holistic Roasters Export Hub")
 
-# --- Tabs ---
 tab_generate, tab_catalog, tab_history = st.tabs(["📝 Generate Documents", "📦 Product Catalog", "🗄️ Documents Archive"])
 
 # --- DEFAULT DATA ---
@@ -194,7 +191,6 @@ HOLISTIC ROASTERS inc. Canada FDA #: 11638755492
 DEFAULT_HTS = "0901.21.00.20"
 DEFAULT_FDA = "31ADT01"
 
-# --- PDF CLASS ---
 class ProInvoice(FPDF):
     def header(self):
         pass
@@ -206,12 +202,10 @@ def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship,
     pdf.add_page()
     pdf.set_auto_page_break(auto=True, margin=20)
     
-    # --- TITLE ---
     pdf.set_font('Helvetica', 'B', 20)
     pdf.cell(0, 10, doc_type, 0, 1, 'C')
     pdf.ln(5)
 
-    # --- INFO BLOCKS ---
     pdf.set_font("Helvetica", '', 9)
     y_start = pdf.get_y()
     
@@ -254,7 +248,6 @@ def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship,
     # Row 2
     y_mid = max(y_end_1, y_end_2, y_end_3) + 10
     
-    # Bill To
     pdf.set_xy(10, y_mid)
     pdf.set_font("Helvetica", 'B', 10)
     lbl_bill = "IMPORTER OF RECORD:" if "COMMERCIAL" in doc_type else "BILL TO:"
@@ -264,7 +257,6 @@ def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship,
     pdf.set_font("Helvetica", '', 9)
     pdf.multi_cell(80, 4, addr_to)
     
-    # Notes
     pdf.set_xy(100, y_mid)
     pdf.set_fill_color(245, 245, 245)
     pdf.rect(100, y_mid, 95, 30, 'F')
@@ -293,7 +285,6 @@ def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship,
         qty = str(int(row['Quantity']))
         prod_name = str(row['Product Name'])[:25]
         desc = str(row['Description'])[:45]
-        
         hts = str(row.get('HTS Code', '') or '')
         fda = str(row.get('FDA Code', '') or '')
         price = f"{row['Transfer Price (Unit)']:.2f}"
@@ -341,7 +332,6 @@ def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship,
 
 # ================= TAB 1: GENERATE DOCUMENTS =================
 with tab_generate:
-    # --- CONFIGURATION EXPANDER ---
     with st.expander("📝 Invoice Details, Addresses & Signature", expanded=True):
         c1, c2, c3 = st.columns(3)
         with c1:
@@ -356,7 +346,6 @@ with tab_generate:
             consignee_txt = st.text_area("Consignee (Ship To)", value=DEFAULT_CONSIGNEE, height=120)
             notes_txt = st.text_area("Notes / Broker", value=DEFAULT_NOTES, height=100)
 
-        # --- SIGNATURE SECTION ---
         st.markdown("---")
         st.markdown("#### Signature Settings")
         sig_col_a, sig_col_b = st.columns(2)
@@ -396,12 +385,10 @@ with tab_generate:
                 if 'Item type' in df.columns:
                     us_shipments = us_shipments[us_shipments['Item type'] == 'product']
                 
-                # --- PREPARE DATA ---
                 if 'Discount' not in us_shipments.columns: us_shipments['Discount'] = "0%"
                 sales_data = us_shipments[['Variant code / SKU', 'Item variant', 'Quantity', 'Price per unit', 'Discount']].copy()
                 sales_data['Variant code / SKU'] = sales_data['Variant code / SKU'].astype(str)
                 
-                # --- MERGE WITH CATALOG ---
                 catalog = get_catalog()
                 if not catalog.empty:
                     catalog['sku'] = catalog['sku'].astype(str)
@@ -418,7 +405,6 @@ with tab_generate:
                     processed['Final HTS'] = DEFAULT_HTS
                     processed['Final FDA'] = DEFAULT_FDA
                 
-                # --- MATH ---
                 processed['Discount_Float'] = processed['Discount'].astype(str).str.replace('%', '', regex=False)
                 processed['Discount_Float'] = pd.to_numeric(processed['Discount_Float'], errors='coerce').fillna(0) / 100.0
                 processed['Original_Retail'] = processed.apply(
@@ -428,7 +414,6 @@ with tab_generate:
                 processed['Transfer Price (Unit)'] = processed['Original_Retail'] * (1 - app_discount_decimal)
                 processed['Transfer Total'] = processed['Quantity'] * processed['Transfer Price (Unit)']
                 
-                # --- CONSOLIDATE ---
                 consolidated = processed.groupby(['Variant code / SKU', 'Final Product Name', 'Final Desc']).agg({
                     'Quantity': 'sum',
                     'Final HTS': 'first',
@@ -444,7 +429,6 @@ with tab_generate:
                     'Final FDA': 'FDA Code'
                 }, inplace=True)
                 
-                # --- TABLE ---
                 st.info("👇 Review Line Items")
                 edited_df = st.data_editor(
                     consolidated,
@@ -456,8 +440,7 @@ with tab_generate:
                 )
                 total_val = edited_df['Transfer Total'].sum()
                 
-                # --- GENERATE PDFS & SAVE TO SESSION STATE ---
-                # We store them in session state so the callback can access the exact binary data
+                # --- GENERATE PDFS ---
                 pdf_ci = generate_pdf("COMMERCIAL INVOICE", edited_df, inv_number, inv_date, 
                                       shipper_txt, importer_txt, consignee_txt, notes_txt, total_val, final_sig_bytes, signer_name)
                 pdf_po = generate_pdf("PURCHASE ORDER", edited_df, inv_number, inv_date, 
@@ -465,28 +448,55 @@ with tab_generate:
                 pdf_si = generate_pdf("SALES INVOICE", edited_df, inv_number, inv_date, 
                                       shipper_txt, importer_txt, consignee_txt, notes_txt, total_val, final_sig_bytes, signer_name)
                 
-                st.session_state['current_pdf_ci'] = pdf_ci
-                st.session_state['current_pdf_po'] = pdf_po
-                st.session_state['current_pdf_si'] = pdf_si
+                # Store PDFs in session state for downloading/emailing
+                st.session_state['current_pdfs'] = {
+                    'ci': pdf_ci, 'po': pdf_po, 'si': pdf_si, 
+                    'inv_num': inv_number, 'total': total_val, 'buyer': importer_txt.split('\n')[0]
+                }
+
+                # --- ACTIONS AREA ---
+                st.divider()
+                col_left, col_right = st.columns([1, 2])
                 
-                # --- DOWNLOAD BUTTONS ---
-                st.subheader("🖨️ Download Documents")
-                st.caption("✅ Documents are automatically archived when you download.")
+                with col_left:
+                    st.subheader("🖨️ Downloads")
+                    # Standard Download Buttons (No callbacks, just pure download)
+                    st.download_button("📄 Download Commercial Invoice", pdf_ci, f"CI-{inv_number}.pdf", "application/pdf")
+                    st.download_button("📄 Download Purchase Order", pdf_po, f"PO-{inv_number}.pdf", "application/pdf")
+                    st.download_button("📄 Download Sales Invoice", pdf_si, f"SI-{inv_number}.pdf", "application/pdf")
                 
-                col_d1, col_d2, col_d3 = st.columns(3)
-                
-                # Arguments for the callback
-                cb_args = (inv_number, total_val, importer_txt.split('\n')[0])
-                
-                with col_d1:
-                    st.download_button("📄 Download Commercial Invoice", pdf_ci, f"CI-{inv_number}.pdf", "application/pdf", 
-                                       on_click=save_invoice_callback, args=cb_args)
-                with col_d2:
-                    st.download_button("📄 Download Purchase Order", pdf_po, f"PO-{inv_number}.pdf", "application/pdf", 
-                                       on_click=save_invoice_callback, args=cb_args)
-                with col_d3:
-                    st.download_button("📄 Download Sales Invoice", pdf_si, f"SI-{inv_number}.pdf", "application/pdf", 
-                                       on_click=save_invoice_callback, args=cb_args)
+                with col_right:
+                    st.subheader("📧 Email Center")
+                    with st.expander("⚙️ Sender Settings (Required)", expanded=False):
+                        st.info("You need an 'App Password' for Gmail. Normal passwords won't work.")
+                        sender_email = st.text_input("Your Email", value="dean.turner@holisticroasters.com")
+                        sender_pass = st.text_input("App Password", type="password")
+                    
+                    recipient_email = st.text_input("Send To:", value="dean.turner@holisticroasters.com")
+                    
+                    if st.button("📧 Email All Documents", type="primary"):
+                        if not sender_pass:
+                            st.error("Please enter your App Password in the settings above.")
+                        else:
+                            # Save record to history first
+                            new_ver = save_invoice_metadata(inv_number, total_val, importer_txt.split('\n')[0])
+                            
+                            # Prepare attachments
+                            files_to_send = [
+                                {'name': f"CI-{new_ver}.pdf", 'data': pdf_ci},
+                                {'name': f"PO-{new_ver}.pdf", 'data': pdf_po},
+                                {'name': f"SI-{new_ver}.pdf", 'data': pdf_si}
+                            ]
+                            
+                            # Send
+                            success, msg = send_email_with_attachments(sender_email, sender_pass, recipient_email, 
+                                                                       f"Export Docs: {new_ver}", 
+                                                                       f"Attached are the export documents for {new_ver}.", 
+                                                                       files_to_send)
+                            if success:
+                                st.success(f"✅ Sent to {recipient_email}")
+                            else:
+                                st.error(f"Failed: {msg}")
 
         except Exception as e:
             st.error(f"Processing Error: {e}")
@@ -522,48 +532,14 @@ with tab_catalog:
 
     st.subheader("Edit Catalog")
     if not current_catalog.empty:
-        edited_catalog = st.data_editor(current_catalog, num_rows="dynamic", key="cat_editor")
+        edited_catalog = st.data_editor(current_catalog, num_rows="dynamic")
         if st.button("💾 Save Changes"):
             upsert_catalog_from_df(edited_catalog)
-            st.success("Changes saved!")
-    else:
-        st.info("Catalog is empty. Upload a CSV or add rows manually if enabled.")
+            st.success("Saved!")
 
 # ================= TAB 3: HISTORY =================
 with tab_history:
     st.header("🗄️ Documents Archive")
-    st.markdown("Click on a row to reveal download buttons for that specific version.")
-    
+    st.caption("Shows log of generated invoices. (Download feature disabled in this view).")
     history_df = get_history()
-    
-    event = st.dataframe(
-        history_df[['invoice_number', 'date_created', 'buyer_name', 'total_value']],
-        use_container_width=True,
-        hide_index=True,
-        on_select="rerun",
-        selection_mode="single-row"
-    )
-    
-    if len(event.selection.rows) > 0:
-        selected_index = event.selection.rows[0]
-        selected_id = history_df.iloc[selected_index]['id']
-        selected_inv_num = history_df.iloc[selected_index]['invoice_number']
-        
-        ci, po, si = get_documents_by_id(selected_id)
-        
-        st.divider()
-        st.subheader(f"⬇️ Downloads for {selected_inv_num}")
-        
-        c_h1, c_h2, c_h3 = st.columns(3)
-        if ci:
-            with c_h1: st.download_button(f"📄 CI-{selected_inv_num}", ci, f"CI-{selected_inv_num}.pdf", "application/pdf")
-        else:
-            with c_h1: st.warning("CI not found")
-        if po:
-            with c_h2: st.download_button(f"📄 PO-{selected_inv_num}", po, f"PO-{selected_inv_num}.pdf", "application/pdf")
-        else:
-            with c_h2: st.warning("PO not found")
-        if si:
-            with c_h3: st.download_button(f"📄 SI-{selected_inv_num}", si, f"SI-{selected_inv_num}.pdf", "application/pdf")
-        else:
-            with c_h3: st.warning("SI not found")
+    st.dataframe(history_df, use_container_width=True, hide_index=True)
