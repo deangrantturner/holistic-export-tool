@@ -257,7 +257,8 @@ with tab_generate:
         with c1:
             inv_number = st.text_input("Invoice #", value=f"INV-{date.today().strftime('%Y%m%d')}")
             inv_date = st.date_input("Date", value=date.today())
-            discount_rate = st.slider("Target Transfer Discount %", 0, 100, 50)
+            # CHANGED: Number Input with 0.1 precision
+            discount_rate = st.number_input("Target Transfer Discount %", min_value=0.0, max_value=100.0, value=50.0, step=0.1, format="%.1f")
         with c2:
             shipper_txt = st.text_area("Shipper / Exporter", value=DEFAULT_SHIPPER, height=120)
             importer_txt = st.text_area("Importer (Bill To)", value=DEFAULT_IMPORTER, height=100)
