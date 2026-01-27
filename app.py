@@ -155,13 +155,15 @@ st.markdown("""
             font-family: 'Open Sans', sans-serif;
         }
 
-        /* Sticky Tabs */
-        div[data-testid="stTabs"] {
+        /* Sticky Tabs Header - UPDATED FIXED VERSION */
+        /* Targets only the tab buttons container, not the whole block */
+        div[data-testid="stTabs"] > div:first-child {
             position: sticky;
             top: 0;
             background-color: #FAFAFA;
-            z-index: 999;
+            z-index: 9999;
             padding-top: 10px;
+            padding-bottom: 10px;
             border-bottom: 2px solid #E0E0E0;
         }
 
