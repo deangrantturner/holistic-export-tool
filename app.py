@@ -13,7 +13,7 @@ def init_db():
     conn = sqlite3.connect('invoices.db')
     c = conn.cursor()
     
-    # NEW HISTORY TABLE (V2) - Stores all 3 documents
+    # 1. History Table
     c.execute('''CREATE TABLE IF NOT EXISTS invoice_history_v2
                  (id INTEGER PRIMARY KEY AUTOINCREMENT,
                   invoice_number TEXT,
@@ -24,12 +24,19 @@ def init_db():
                   pdf_po BLOB,
                   pdf_si BLOB)''')
     
+    # 2. Catalog Table
     c.execute('''CREATE TABLE IF NOT EXISTS product_catalog_v3
                  (sku TEXT PRIMARY KEY,
                   product_name TEXT,
                   description TEXT,
                   hts_code TEXT,
                   fda_code TEXT)''')
+
+    # 3. Settings Table (For Signature)
+    c.execute('''CREATE TABLE IF NOT EXISTS settings
+                 (key TEXT PRIMARY KEY,
+                  value BLOB)''')
+                  
     conn.commit()
     conn.close()
 
@@ -37,23 +44,19 @@ def init_db():
 def save_invoice_to_db(inv_num, total_val, buyer, pdf_ci, pdf_po, pdf_si):
     conn = sqlite3.connect('invoices.db')
     c = conn.cursor()
-    # Check if invoice exists to avoid duplicates
     c.execute("SELECT id FROM invoice_history_v2 WHERE invoice_number=?", (inv_num,))
     exists = c.fetchone()
     
     if exists:
-        # Update existing
         c.execute("""UPDATE invoice_history_v2 
                      SET total_value=?, buyer_name=?, pdf_ci=?, pdf_po=?, pdf_si=?
                      WHERE invoice_number=?""",
                   (total_val, buyer, pdf_ci, pdf_po, pdf_si, inv_num))
     else:
-        # Insert new
         c.execute("""INSERT INTO invoice_history_v2 
                      (invoice_number, date_created, total_value, buyer_name, pdf_ci, pdf_po, pdf_si) 
                      VALUES (?, ?, ?, ?, ?, ?, ?)""",
                   (inv_num, date.today(), total_val, buyer, pdf_ci, pdf_po, pdf_si))
-    
     conn.commit()
     conn.close()
 
@@ -71,6 +74,7 @@ def get_documents_from_db(invoice_number):
     conn.close()
     return data if data else (None, None, None)
 
+# --- Catalog Functions ---
 def get_catalog():
     conn = sqlite3.connect('invoices.db')
     df = pd.read_sql_query("SELECT * FROM product_catalog_v3", conn)
@@ -98,6 +102,22 @@ def clear_catalog():
     c.execute("DELETE FROM product_catalog_v3")
     conn.commit()
     conn.close()
+
+# --- Signature Functions ---
+def save_signature(image_bytes):
+    conn = sqlite3.connect('invoices.db')
+    c = conn.cursor()
+    c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('signature', ?)", (image_bytes,))
+    conn.commit()
+    conn.close()
+
+def get_signature():
+    conn = sqlite3.connect('invoices.db')
+    c = conn.cursor()
+    c.execute("SELECT value FROM settings WHERE key='signature'")
+    data = c.fetchone()
+    conn.close()
+    return data[0] if data else None
 
 init_db()
 
@@ -139,7 +159,7 @@ class ProInvoice(FPDF):
     def footer(self):
         pass
 
-def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes, total_val, signature_file=None):
+def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes, total_val, sig_bytes=None, signer_name="Dean Turner"):
     pdf = ProInvoice()
     pdf.add_page()
     pdf.set_auto_page_break(auto=True, margin=20)
@@ -259,36 +279,66 @@ def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship,
     pdf.cell(0, 5, "I declare that all information contained in this invoice to be true and correct.", 0, 1, 'L')
     pdf.ln(5)
     
-    if signature_file:
+    if sig_bytes:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp:
-            tmp.write(signature_file.getvalue())
+            tmp.write(sig_bytes)
             tmp_path = tmp.name
         try:
             pdf.image(tmp_path, w=40)
         except:
-            pdf.cell(0, 5, "[Error rendering signature]", 0, 1)
+            pdf.cell(0, 5, "[Signature Image Error]", 0, 1)
         os.unlink(tmp_path)
     else:
         pdf.ln(15)
     
     pdf.ln(2)
     pdf.set_font("Helvetica", 'B', 10)
-    pdf.cell(0, 5, "Dean Turner", 0, 1, 'L')
+    pdf.cell(0, 5, signer_name, 0, 1, 'L')
 
     return bytes(pdf.output())
 
 # ================= TAB 1: GENERATE DOCUMENTS =================
 with tab_generate:
-    with st.expander("📝 Invoice Details & Addresses", expanded=True):
+    # --- CONFIGURATION EXPANDER ---
+    with st.expander("📝 Invoice Details, Addresses & Signature", expanded=True):
         c1, c2, c3 = st.columns(3)
         with c1:
             inv_number = st.text_input("Invoice #", value=f"INV-{date.today().strftime('%Y%m%d')}")
             inv_date = st.date_input("Date", value=date.today())
             discount_rate = st.number_input("Target Transfer Discount %", min_value=0.0, max_value=100.0, value=50.0, step=0.1, format="%.1f")
             
+            # --- SIGNATURE SECTION ---
             st.markdown("---")
-            st.markdown("**Signature**")
-            sig_file = st.file_uploader("Upload Signature (PNG/JPG)", type=['png', 'jpg', 'jpeg'], key="sig_upl")
+            st.markdown("#### Signature")
+            
+            # Name Input
+            signer_name = st.text_input("Signatory Name", value="Dean Turner")
+
+            # Load Saved Signature from DB
+            saved_sig = get_signature()
+            if saved_sig:
+                st.success("✅ Signature Loaded from Database")
+                # Option to clear or replace
+                if st.button("Clear Saved Signature"):
+                    conn = sqlite3.connect('invoices.db')
+                    conn.execute("DELETE FROM settings WHERE key='signature'")
+                    conn.commit()
+                    conn.close()
+                    st.rerun()
+            else:
+                st.warning("⚠️ No signature saved.")
+            
+            # Upload New Signature
+            sig_upload = st.file_uploader("Upload New Signature", type=['png', 'jpg', 'jpeg'], key="sig_upl")
+            if sig_upload:
+                # Save immediately to DB
+                bytes_data = sig_upload.getvalue()
+                save_signature(bytes_data)
+                st.success("Signature Saved! It will persist now.")
+                st.rerun()
+            
+            # Determine which bytes to use
+            final_sig_bytes = saved_sig if saved_sig else (sig_upload.getvalue() if sig_upload else None)
             
         with c2:
             shipper_txt = st.text_area("Shipper / Exporter", value=DEFAULT_SHIPPER, height=120)
@@ -375,29 +425,36 @@ with tab_generate:
                 )
                 total_val = edited_df['Transfer Total'].sum()
 
-                # --- GENERATE ALL 3 DOCS ---
+                # --- AUTO-GENERATE ALL DOCS FOR DOWNLOAD ---
                 pdf_ci = generate_pdf("COMMERCIAL INVOICE", edited_df, inv_number, inv_date, 
-                                      shipper_txt, importer_txt, consignee_txt, notes_txt, total_val, sig_file)
+                                      shipper_txt, importer_txt, consignee_txt, notes_txt, total_val, final_sig_bytes, signer_name)
                 pdf_po = generate_pdf("PURCHASE ORDER", edited_df, inv_number, inv_date, 
-                                      importer_txt, shipper_txt, consignee_txt, notes_txt, total_val, sig_file)
+                                      importer_txt, shipper_txt, consignee_txt, notes_txt, total_val, final_sig_bytes, signer_name)
                 pdf_si = generate_pdf("SALES INVOICE", edited_df, inv_number, inv_date, 
-                                      shipper_txt, importer_txt, consignee_txt, notes_txt, total_val, sig_file)
+                                      shipper_txt, importer_txt, consignee_txt, notes_txt, total_val, final_sig_bytes, signer_name)
 
-                # --- ACTIONS ---
-                st.subheader("🖨️ Actions")
-                c1, c2, c3, c4 = st.columns(4)
+                # --- AUTO-SAVE FUNCTION ---
+                # We save every time the PDF is generated (which happens on every refresh/edit). 
+                # This ensures the DB is always in sync with what is on screen.
+                # However, to avoid spamming the DB on every keystroke, we can save only on download click callback.
                 
-                with c1:
-                    if st.button("💾 Save All to History", type="primary"):
-                        save_invoice_to_db(inv_number, total_val, importer_txt.split('\n')[0], pdf_ci, pdf_po, pdf_si)
-                        st.success("Saved CI, PO, and SI to History!")
+                def auto_save_callback():
+                    save_invoice_to_db(inv_number, total_val, importer_txt.split('\n')[0], pdf_ci, pdf_po, pdf_si)
+                    # We don't show a success message here to avoid interrupting the download flow, 
+                    # but the data is safely stored.
+
+                # --- DOWNLOAD BUTTONS ---
+                st.subheader("🖨️ Download Documents (Auto-Saves to History)")
+                col_d1, col_d2, col_d3 = st.columns(3)
+
+                with col_d1:
+                    st.download_button("📄 Commercial Invoice", pdf_ci, f"CI-{inv_number}.pdf", "application/pdf", on_click=auto_save_callback)
+                with col_d2:
+                    st.download_button("📄 Purchase Order", pdf_po, f"PO-{inv_number}.pdf", "application/pdf", on_click=auto_save_callback)
+                with col_d3:
+                    st.download_button("📄 Sales Invoice", pdf_si, f"SI-{inv_number}.pdf", "application/pdf", on_click=auto_save_callback)
                 
-                with c2:
-                    st.download_button("📄 Download CI", pdf_ci, file_name=f"CI-{inv_number}.pdf", mime="application/pdf")
-                with c3:
-                    st.download_button("📄 Download PO", pdf_po, file_name=f"PO-{inv_number}.pdf", mime="application/pdf")
-                with c4:
-                    st.download_button("📄 Download SI", pdf_si, file_name=f"SI-{inv_number}.pdf", mime="application/pdf")
+                st.success(f"✅ Ready. Downloading any file will automatically save Invoice #{inv_number} to the archive.")
 
         except Exception as e:
             st.error(f"Processing Error: {e}")
