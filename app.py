@@ -144,14 +144,73 @@ init_db()
 # --- Page Config ---
 st.set_page_config(page_title="Holistic Roasters Export Hub", layout="wide")
 
+# --- CUSTOM BRANDING CSS ---
 st.markdown("""
     <style>
+        @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700&family=Open+Sans:wght@400;600&display=swap');
+
+        /* Main App Background */
+        .stApp {
+            background-color: #FAFAFA; /* Soft Off-White */
+            font-family: 'Open Sans', sans-serif;
+        }
+
+        /* Sticky Tabs */
         div[data-testid="stTabs"] {
             position: sticky;
             top: 0;
-            background-color: white;
+            background-color: #FAFAFA;
             z-index: 999;
             padding-top: 10px;
+            border-bottom: 2px solid #E0E0E0;
+        }
+
+        /* Headers */
+        h1, h2, h3 {
+            font-family: 'Montserrat', sans-serif !important;
+            color: #6F4E37 !important; /* Coffee Brown */
+            font-weight: 700;
+        }
+
+        /* Buttons (Primary - Coffee Brown) */
+        div.stButton > button {
+            background-color: #6F4E37 !important;
+            color: white !important;
+            border-radius: 8px !important;
+            border: none !important;
+            padding: 0.5rem 1rem !important;
+            font-family: 'Montserrat', sans-serif !important;
+            font-weight: 600 !important;
+            transition: all 0.2s ease;
+        }
+        div.stButton > button:hover {
+            background-color: #5A3E2B !important; /* Darker Brown Hover */
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+
+        /* Secondary/Ghost Buttons */
+        div.stButton > button[kind="secondary"] {
+            background-color: transparent !important;
+            border: 2px solid #6F4E37 !important;
+            color: #6F4E37 !important;
+        }
+
+        /* Inputs & Text Areas */
+        .stTextInput input, .stTextArea textarea, .stDateInput input, .stNumberInput input {
+            border-radius: 8px !important;
+            border: 1px solid #D0D0D0 !important;
+            background-color: white !important;
+        }
+        .stTextInput input:focus, .stTextArea textarea:focus {
+            border-color: #6F4E37 !important;
+            box-shadow: 0 0 0 1px #6F4E37 !important;
+        }
+
+        /* Tables */
+        div[data-testid="stDataFrame"] {
+            border: 1px solid #E0E0E0;
+            border-radius: 8px;
+            overflow: hidden;
         }
     </style>
 """, unsafe_allow_html=True)
@@ -193,7 +252,7 @@ class ProInvoice(FPDF):
 def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes, total_val, sig_bytes=None, signer_name="Dean Turner"):
     pdf = ProInvoice()
     pdf.add_page()
-    pdf.set_auto_page_break(auto=False) # We handle page breaks manually for the table
+    pdf.set_auto_page_break(auto=False)
     
     # --- HEADER ---
     pdf.set_font('Helvetica', 'B', 20)
@@ -276,10 +335,9 @@ def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship,
     
     # --- DYNAMIC TABLE ROWS ---
     pdf.set_font("Helvetica", '', 7)
-    line_h = 5  # Base height for one line of text
+    line_h = 5
 
     for _, row in df.iterrows():
-        # Prepare Data
         qty = str(int(row['Quantity']))
         prod_name = str(row['Product Name'])
         desc = str(row['Description'])
@@ -293,29 +351,20 @@ def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship,
             (hts, 'C'), (fda, 'C'), (price, 'R'), (tot, 'R')
         ]
         
-        # 1. Calculate Max Row Height needed
-        # We estimate how many lines each column needs
         max_lines = 1
         for i, (txt, align) in enumerate(data_row):
             col_w = w[i]
-            # Get string width
             txt_w = pdf.get_string_width(txt)
-            # available width (minus padding buffer)
             avail_w = col_w - 2
-            # rough estimate of lines
             lines = math.ceil(txt_w / avail_w)
             if lines < 1: lines = 1
-            # Add extra if there are explicit newlines
             lines += txt.count('\n')
             if lines > max_lines: max_lines = lines
             
         row_h = max_lines * line_h
         
-        # 2. Check Page Break
-        # If this row pushes us below ~270mm, add a page
         if pdf.get_y() + row_h > 270:
             pdf.add_page()
-            # Reprint headers (Optional, but nice)
             pdf.set_font("Helvetica", 'B', 7)
             pdf.set_fill_color(220, 220, 220)
             for i, h in enumerate(headers):
@@ -323,26 +372,19 @@ def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship,
             pdf.ln()
             pdf.set_font("Helvetica", '', 7)
             
-        # 3. Print Cells
         y_start = pdf.get_y()
-        x_start = 10 # standard left margin
+        x_start = 10
         
         for i, (txt, align) in enumerate(data_row):
-            # Move to correct X column
             current_x = x_start + sum(w[:i])
             pdf.set_xy(current_x, y_start)
-            
-            # Print text using multi_cell for wrapping
             pdf.multi_cell(w[i], line_h, txt, 0, align)
             
-        # 4. Draw Borders (Rectangles) around the whole row height
-        # This ensures all columns have equal height borders, even if text was short
         pdf.set_xy(x_start, y_start)
         for i in range(len(w)):
             current_x = x_start + sum(w[:i])
             pdf.rect(current_x, y_start, w[i], row_h)
             
-        # 5. Move Cursor to next row
         pdf.set_xy(x_start, y_start + row_h)
 
     pdf.ln(2)
