@@ -5,6 +5,8 @@ from fpdf import FPDF
 from datetime import date
 import io
 import re
+import tempfile
+import os
 
 # --- Database Setup (SQLite) ---
 def init_db():
@@ -116,16 +118,13 @@ class ProInvoice(FPDF):
     def header(self):
         pass
     def footer(self):
-        self.set_y(-25)
-        self.set_font('Helvetica', 'I', 8)
-        self.cell(0, 5, "I declare that all information contained in this invoice to be true and correct.", 0, 1, 'C')
-        self.cell(0, 5, "These goods are of Canadian origin (CUSMA/USMCA qualified).", 0, 1, 'C')
-        self.ln(2)
-        self.cell(0, 5, f'Page {self.page_no()}', 0, 0, 'C')
+        # REMOVED FOOTER ENTIRELY AS REQUESTED
+        pass
 
-def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes, total_val):
+def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes, total_val, signature_file=None):
     pdf = ProInvoice()
     pdf.add_page()
+    # Margin set to 20mm to allow content to flow naturally without footer collision
     pdf.set_auto_page_break(auto=True, margin=20)
     
     # --- TITLE ---
@@ -133,7 +132,7 @@ def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship,
     pdf.cell(0, 10, doc_type, 0, 1, 'C')
     pdf.ln(5)
 
-    # --- INFO BLOCKS (Strict X-Y Locking) ---
+    # --- INFO BLOCKS ---
     pdf.set_font("Helvetica", '', 9)
     y_start = pdf.get_y()
     
@@ -244,21 +243,56 @@ def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship,
     pdf.cell(sum(w[:-1]), 8, "TOTAL VALUE (USD):", 0, 0, 'R')
     pdf.cell(w[-1], 8, f"${total_val:,.2f}", 1, 1, 'R')
     
-    pdf.ln(15)
-    if "COMMERCIAL" in doc_type:
-        pdf.cell(100, 5, "Authorized Signature: __________________________", 0, 1)
+    # --- SIGNATURE BLOCK ---
+    pdf.ln(10)
+    # Check if we need to start a new page for signature to avoid split
+    if pdf.get_y() > 250:
+        pdf.add_page()
+    
+    pdf.set_font("Helvetica", '', 10)
+    pdf.cell(0, 5, "I declare that all information contained in this invoice to be true and correct.", 0, 1, 'L')
+    pdf.ln(5)
+    
+    # IMAGE
+    if signature_file:
+        # Save uploaded file to temp path for FPDF
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp:
+            tmp.write(signature_file.getvalue())
+            tmp_path = tmp.name
+        
+        # Place image (Width 40mm)
+        try:
+            pdf.image(tmp_path, w=40)
+        except:
+            pdf.cell(0, 5, "[Error rendering signature image]", 0, 1)
+        
+        # Cleanup temp file
+        os.unlink(tmp_path)
+    else:
+        pdf.ln(15) # Space if no image
+    
+    # Name
+    pdf.ln(2)
+    pdf.set_font("Helvetica", 'B', 10)
+    pdf.cell(0, 5, "Dean Turner", 0, 1, 'L')
 
     return bytes(pdf.output())
 
 # ================= TAB 1: GENERATE DOCUMENTS =================
 with tab_generate:
+    # --- CONFIGURATION EXPANDER ---
     with st.expander("📝 Invoice Details & Addresses", expanded=True):
         c1, c2, c3 = st.columns(3)
         with c1:
             inv_number = st.text_input("Invoice #", value=f"INV-{date.today().strftime('%Y%m%d')}")
             inv_date = st.date_input("Date", value=date.today())
-            # CHANGED: Number Input with 0.1 precision
             discount_rate = st.number_input("Target Transfer Discount %", min_value=0.0, max_value=100.0, value=50.0, step=0.1, format="%.1f")
+            
+            # --- SIGNATURE UPLOAD ---
+            st.markdown("---")
+            st.markdown("**Signature**")
+            sig_file = st.file_uploader("Upload Signature (PNG/JPG)", type=['png', 'jpg', 'jpeg'], key="sig_upl")
+            
         with c2:
             shipper_txt = st.text_area("Shipper / Exporter", value=DEFAULT_SHIPPER, height=120)
             importer_txt = st.text_area("Importer (Bill To)", value=DEFAULT_IMPORTER, height=100)
@@ -304,16 +338,14 @@ with tab_generate:
                     processed['Final HTS'] = DEFAULT_HTS
                     processed['Final FDA'] = DEFAULT_FDA
                 
-                # --- MATH: ORIGINAL RETAIL & DISCOUNT ---
+                # --- MATH ---
                 processed['Discount_Float'] = processed['Discount'].astype(str).str.replace('%', '', regex=False)
                 processed['Discount_Float'] = pd.to_numeric(processed['Discount_Float'], errors='coerce').fillna(0) / 100.0
                 
-                # Calculate True Retail Price (Backing out any promo discounts)
                 processed['Original_Retail'] = processed.apply(
                     lambda row: row['Price per unit'] / (1 - row['Discount_Float']) if row['Discount_Float'] < 1.0 else 0, axis=1
                 )
                 
-                # Calculate Transfer Price from True Retail
                 app_discount_decimal = discount_rate / 100.0
                 processed['Transfer Price (Unit)'] = processed['Original_Retail'] * (1 - app_discount_decimal)
                 processed['Transfer Total'] = processed['Quantity'] * processed['Transfer Price (Unit)']
@@ -351,22 +383,23 @@ with tab_generate:
                 col_d1, col_d2, col_d3 = st.columns(3)
 
                 with col_d1:
+                    # Pass sig_file to PDF generator
                     pdf_ci = generate_pdf("COMMERCIAL INVOICE", edited_df, inv_number, inv_date, 
-                                          shipper_txt, importer_txt, consignee_txt, notes_txt, total_val)
-                    st.download_button("📄 Download Commercial Invoice", pdf_ci, file_name=f"CI-{inv_number}.pdf", mime="application/pdf")
+                                          shipper_txt, importer_txt, consignee_txt, notes_txt, total_val, sig_file)
+                    st.download_button("📄 Commercial Invoice", pdf_ci, file_name=f"CI-{inv_number}.pdf", mime="application/pdf")
                     if st.button("💾 Save to History", key="save_ci"):
                         save_invoice_to_db(inv_number, total_val, pdf_ci, importer_txt.split('\n')[0])
                         st.success("Saved!")
 
                 with col_d2:
                     pdf_po = generate_pdf("PURCHASE ORDER", edited_df, inv_number, inv_date, 
-                                          importer_txt, shipper_txt, consignee_txt, notes_txt, total_val)
-                    st.download_button("📄 Download Purchase Order", pdf_po, file_name=f"PO-{inv_number}.pdf", mime="application/pdf")
+                                          importer_txt, shipper_txt, consignee_txt, notes_txt, total_val, sig_file)
+                    st.download_button("📄 Purchase Order", pdf_po, file_name=f"PO-{inv_number}.pdf", mime="application/pdf")
 
                 with col_d3:
                     pdf_si = generate_pdf("SALES INVOICE", edited_df, inv_number, inv_date, 
-                                          shipper_txt, importer_txt, consignee_txt, notes_txt, total_val)
-                    st.download_button("📄 Download Sales Invoice", pdf_si, file_name=f"SI-{inv_number}.pdf", mime="application/pdf")
+                                          shipper_txt, importer_txt, consignee_txt, notes_txt, total_val, sig_file)
+                    st.download_button("📄 Sales Invoice", pdf_si, file_name=f"SI-{inv_number}.pdf", mime="application/pdf")
 
         except Exception as e:
             st.error(f"Processing Error: {e}")
