@@ -12,12 +12,12 @@ import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.application import MIMEApplication
+import math
 
 # --- Database Setup (SQLite) ---
 def init_db():
     conn = sqlite3.connect('invoices.db')
     c = conn.cursor()
-    # Simplified history table (metadata only for now)
     c.execute('''CREATE TABLE IF NOT EXISTS invoice_history_v3
                  (id INTEGER PRIMARY KEY AUTOINCREMENT,
                   invoice_number TEXT,
@@ -40,12 +40,10 @@ def init_db():
 
 # --- DB Functions ---
 def save_invoice_metadata(inv_num, total_val, buyer):
-    """Saves just the record that an invoice was generated."""
     try:
         conn = sqlite3.connect('invoices.db')
         c = conn.cursor()
         
-        # Versioning Logic
         c.execute("SELECT invoice_number FROM invoice_history_v3 WHERE invoice_number LIKE ?", (inv_num + '%',))
         existing_nums = [row[0] for row in c.fetchall()]
         
@@ -120,10 +118,6 @@ def get_signature():
 
 # --- Email Function ---
 def send_email_with_attachments(sender_email, sender_password, recipient_email, subject, body, files):
-    """
-    Sends an email with PDF attachments.
-    files: list of dicts {'name': 'filename.pdf', 'data': bytes}
-    """
     msg = MIMEMultipart()
     msg['From'] = sender_email
     msg['To'] = recipient_email
@@ -136,7 +130,6 @@ def send_email_with_attachments(sender_email, sender_password, recipient_email, 
         msg.attach(part)
 
     try:
-        # Defaulting to Gmail/Google Workspace settings
         server = smtplib.SMTP('smtp.gmail.com', 587)
         server.starttls()
         server.login(sender_email, sender_password)
@@ -200,12 +193,14 @@ class ProInvoice(FPDF):
 def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes, total_val, sig_bytes=None, signer_name="Dean Turner"):
     pdf = ProInvoice()
     pdf.add_page()
-    pdf.set_auto_page_break(auto=True, margin=20)
+    pdf.set_auto_page_break(auto=False) # We handle page breaks manually for the table
     
+    # --- HEADER ---
     pdf.set_font('Helvetica', 'B', 20)
     pdf.cell(0, 10, doc_type, 0, 1, 'C')
     pdf.ln(5)
 
+    # --- INFO BLOCKS ---
     pdf.set_font("Helvetica", '', 9)
     y_start = pdf.get_y()
     
@@ -269,7 +264,7 @@ def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship,
     
     pdf.set_y(y_mid + 35)
 
-    # --- TABLE ---
+    # --- TABLE HEADERS ---
     w = [12, 40, 45, 23, 23, 22, 25]
     headers = ["QTY", "PRODUCT", "DESCRIPTION", "HTS #", "FDA CODE", "UNIT ($)", "TOTAL ($)"]
     
@@ -279,24 +274,76 @@ def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship,
         pdf.cell(w[i], 8, h, 1, 0, 'C', fill=True)
     pdf.ln()
     
+    # --- DYNAMIC TABLE ROWS ---
     pdf.set_font("Helvetica", '', 7)
-    
+    line_h = 5  # Base height for one line of text
+
     for _, row in df.iterrows():
+        # Prepare Data
         qty = str(int(row['Quantity']))
-        prod_name = str(row['Product Name'])[:25]
-        desc = str(row['Description'])[:45]
+        prod_name = str(row['Product Name'])
+        desc = str(row['Description'])
         hts = str(row.get('HTS Code', '') or '')
         fda = str(row.get('FDA Code', '') or '')
         price = f"{row['Transfer Price (Unit)']:.2f}"
         tot = f"{row['Transfer Total']:.2f}"
         
-        pdf.cell(w[0], 6, qty, 1, 0, 'C')
-        pdf.cell(w[1], 6, prod_name, 1, 0, 'L')
-        pdf.cell(w[2], 6, desc, 1, 0, 'L')
-        pdf.cell(w[3], 6, hts, 1, 0, 'C')
-        pdf.cell(w[4], 6, fda, 1, 0, 'C')
-        pdf.cell(w[5], 6, price, 1, 0, 'R')
-        pdf.cell(w[6], 6, tot, 1, 1, 'R')
+        data_row = [
+            (qty, 'C'), (prod_name, 'L'), (desc, 'L'),
+            (hts, 'C'), (fda, 'C'), (price, 'R'), (tot, 'R')
+        ]
+        
+        # 1. Calculate Max Row Height needed
+        # We estimate how many lines each column needs
+        max_lines = 1
+        for i, (txt, align) in enumerate(data_row):
+            col_w = w[i]
+            # Get string width
+            txt_w = pdf.get_string_width(txt)
+            # available width (minus padding buffer)
+            avail_w = col_w - 2
+            # rough estimate of lines
+            lines = math.ceil(txt_w / avail_w)
+            if lines < 1: lines = 1
+            # Add extra if there are explicit newlines
+            lines += txt.count('\n')
+            if lines > max_lines: max_lines = lines
+            
+        row_h = max_lines * line_h
+        
+        # 2. Check Page Break
+        # If this row pushes us below ~270mm, add a page
+        if pdf.get_y() + row_h > 270:
+            pdf.add_page()
+            # Reprint headers (Optional, but nice)
+            pdf.set_font("Helvetica", 'B', 7)
+            pdf.set_fill_color(220, 220, 220)
+            for i, h in enumerate(headers):
+                pdf.cell(w[i], 8, h, 1, 0, 'C', fill=True)
+            pdf.ln()
+            pdf.set_font("Helvetica", '', 7)
+            
+        # 3. Print Cells
+        y_start = pdf.get_y()
+        x_start = 10 # standard left margin
+        
+        for i, (txt, align) in enumerate(data_row):
+            # Move to correct X column
+            current_x = x_start + sum(w[:i])
+            pdf.set_xy(current_x, y_start)
+            
+            # Print text using multi_cell for wrapping
+            pdf.multi_cell(w[i], line_h, txt, 0, align)
+            
+        # 4. Draw Borders (Rectangles) around the whole row height
+        # This ensures all columns have equal height borders, even if text was short
+        pdf.set_xy(x_start, y_start)
+        for i in range(len(w)):
+            current_x = x_start + sum(w[:i])
+            pdf.rect(current_x, y_start, w[i], row_h)
+            
+        # 5. Move Cursor to next row
+        pdf.set_xy(x_start, y_start + row_h)
 
     pdf.ln(2)
     pdf.set_font("Helvetica", 'B', 9)
@@ -448,7 +495,6 @@ with tab_generate:
                 pdf_si = generate_pdf("SALES INVOICE", edited_df, inv_number, inv_date, 
                                       shipper_txt, importer_txt, consignee_txt, notes_txt, total_val, final_sig_bytes, signer_name)
                 
-                # Store PDFs in session state for downloading/emailing
                 st.session_state['current_pdfs'] = {
                     'ci': pdf_ci, 'po': pdf_po, 'si': pdf_si, 
                     'inv_num': inv_number, 'total': total_val, 'buyer': importer_txt.split('\n')[0]
@@ -460,7 +506,6 @@ with tab_generate:
                 
                 with col_left:
                     st.subheader("🖨️ Downloads")
-                    # Standard Download Buttons (No callbacks, just pure download)
                     st.download_button("📄 Download Commercial Invoice", pdf_ci, f"CI-{inv_number}.pdf", "application/pdf")
                     st.download_button("📄 Download Purchase Order", pdf_po, f"PO-{inv_number}.pdf", "application/pdf")
                     st.download_button("📄 Download Sales Invoice", pdf_si, f"SI-{inv_number}.pdf", "application/pdf")
@@ -478,17 +523,14 @@ with tab_generate:
                         if not sender_pass:
                             st.error("Please enter your App Password in the settings above.")
                         else:
-                            # Save record to history first
                             new_ver = save_invoice_metadata(inv_number, total_val, importer_txt.split('\n')[0])
                             
-                            # Prepare attachments
                             files_to_send = [
                                 {'name': f"CI-{new_ver}.pdf", 'data': pdf_ci},
                                 {'name': f"PO-{new_ver}.pdf", 'data': pdf_po},
                                 {'name': f"SI-{new_ver}.pdf", 'data': pdf_si}
                             ]
                             
-                            # Send
                             success, msg = send_email_with_attachments(sender_email, sender_pass, recipient_email, 
                                                                        f"Export Docs: {new_ver}", 
                                                                        f"Attached are the export documents for {new_ver}.", 
