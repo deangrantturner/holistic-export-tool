@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import sqlite3
 from fpdf import FPDF
-from datetime import date
+from datetime import datetime, date
 import io
 import re
 import tempfile
@@ -40,19 +40,15 @@ def save_invoice_to_db(inv_num, total_val, buyer, pdf_ci, pdf_po, pdf_si):
     try:
         conn = sqlite3.connect('invoices.db')
         c = conn.cursor()
-        c.execute("SELECT id FROM invoice_history_v2 WHERE invoice_number=?", (inv_num,))
-        exists = c.fetchone()
         
-        if exists:
-            c.execute("""UPDATE invoice_history_v2 
-                         SET total_value=?, buyer_name=?, pdf_ci=?, pdf_po=?, pdf_si=?
-                         WHERE invoice_number=?""",
-                      (total_val, buyer, pdf_ci, pdf_po, pdf_si, inv_num))
-        else:
-            c.execute("""INSERT INTO invoice_history_v2 
-                         (invoice_number, date_created, total_value, buyer_name, pdf_ci, pdf_po, pdf_si) 
-                         VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                      (inv_num, date.today(), total_val, buyer, pdf_ci, pdf_po, pdf_si))
+        # CHANGED: Always INSERT a new record with a precise timestamp. 
+        # We no longer check for existence or update old records.
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+        
+        c.execute("""INSERT INTO invoice_history_v2 
+                     (invoice_number, date_created, total_value, buyer_name, pdf_ci, pdf_po, pdf_si) 
+                     VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                  (inv_num, timestamp, total_val, buyer, pdf_ci, pdf_po, pdf_si))
         conn.commit()
         conn.close()
     except Exception:
@@ -60,14 +56,16 @@ def save_invoice_to_db(inv_num, total_val, buyer, pdf_ci, pdf_po, pdf_si):
 
 def get_history():
     conn = sqlite3.connect('invoices.db')
-    df = pd.read_sql_query("SELECT invoice_number, date_created, buyer_name, total_value FROM invoice_history_v2 ORDER BY id DESC", conn)
+    # We fetch the ID now so we can select specific versions later
+    df = pd.read_sql_query("SELECT id, invoice_number, date_created, buyer_name, total_value FROM invoice_history_v2 ORDER BY id DESC", conn)
     conn.close()
     return df
 
-def get_documents_from_db(invoice_number):
+def get_documents_by_id(record_id):
     conn = sqlite3.connect('invoices.db')
     c = conn.cursor()
-    c.execute("SELECT pdf_ci, pdf_po, pdf_si FROM invoice_history_v2 WHERE invoice_number=?", (invoice_number,))
+    # Fetch by unique Row ID, not Invoice Number (since Invoice Number can now be duplicated)
+    c.execute("SELECT pdf_ci, pdf_po, pdf_si FROM invoice_history_v2 WHERE id=?", (record_id,))
     data = c.fetchone()
     conn.close()
     return data if data else (None, None, None)
@@ -332,7 +330,6 @@ with tab_generate:
                 saved_sig = get_signature()
                 if saved_sig:
                     st.success("✅ Signature on file")
-                    # FIXED LINE BELOW - removed size parameter
                     if st.button("Clear Signature"):
                         conn = sqlite3.connect('invoices.db')
                         conn.execute("DELETE FROM settings WHERE key='signature'")
@@ -517,25 +514,36 @@ with tab_catalog:
 with tab_history:
     st.header("🗄️ Documents Archive")
     history_df = get_history()
-    st.dataframe(history_df, use_container_width=True)
-    inv_list = history_df['invoice_number'].unique()
-    if len(inv_list) > 0:
-        sel_inv = st.selectbox("Select Invoice to Download:", inv_list)
+    
+    # Show History Table
+    st.dataframe(history_df[['invoice_number', 'date_created', 'buyer_name', 'total_value']], use_container_width=True)
+    
+    # Create Selection Box with Time Info
+    inv_options = {}
+    for index, row in history_df.iterrows():
+        label = f"{row['invoice_number']} | {row['date_created']} | ${row['total_value']:.2f}"
+        inv_options[label] = row['id']
+    
+    if inv_options:
+        sel_label = st.selectbox("Select Version to Download:", list(inv_options.keys()))
+        sel_id = inv_options[sel_label]
+        
         if st.button("Fetch Documents"):
-            ci, po, si = get_documents_from_db(sel_inv)
+            ci, po, si = get_documents_by_id(sel_id)
+            inv_num_clean = sel_label.split(" | ")[0] # Extract INV number for filename
             
             c_h1, c_h2, c_h3 = st.columns(3)
             if ci:
-                with c_h1: st.download_button(f"📄 Download CI-{sel_inv}", ci, f"CI-{sel_inv}.pdf", "application/pdf")
+                with c_h1: st.download_button(f"📄 CI-{inv_num_clean}", ci, f"CI-{inv_num_clean}.pdf", "application/pdf")
             else:
                 with c_h1: st.warning("CI not found")
             
             if po:
-                with c_h2: st.download_button(f"📄 Download PO-{sel_inv}", po, f"PO-{sel_inv}.pdf", "application/pdf")
+                with c_h2: st.download_button(f"📄 PO-{inv_num_clean}", po, f"PO-{inv_num_clean}.pdf", "application/pdf")
             else:
                 with c_h2: st.warning("PO not found")
                 
             if si:
-                with c_h3: st.download_button(f"📄 Download SI-{sel_inv}", si, f"SI-{sel_inv}.pdf", "application/pdf")
+                with c_h3: st.download_button(f"📄 SI-{inv_num_clean}", si, f"SI-{inv_num_clean}.pdf", "application/pdf")
             else:
                 with c_h3: st.warning("SI not found")
