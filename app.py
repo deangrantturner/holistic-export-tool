@@ -11,7 +11,6 @@ import re
 def init_db():
     conn = sqlite3.connect('invoices.db')
     c = conn.cursor()
-    # History Table
     c.execute('''CREATE TABLE IF NOT EXISTS invoice_history
                  (id INTEGER PRIMARY KEY AUTOINCREMENT,
                   invoice_number TEXT,
@@ -20,7 +19,6 @@ def init_db():
                   pdf_data BLOB,
                   buyer_name TEXT)''')
     
-    # Catalog Table V3
     c.execute('''CREATE TABLE IF NOT EXISTS product_catalog_v3
                  (sku TEXT PRIMARY KEY,
                   product_name TEXT,
@@ -30,7 +28,7 @@ def init_db():
     conn.commit()
     conn.close()
 
-# --- DB: History Functions ---
+# --- DB Functions ---
 def save_invoice_to_db(inv_num, total_val, pdf_bytes, buyer):
     conn = sqlite3.connect('invoices.db')
     c = conn.cursor()
@@ -53,7 +51,6 @@ def get_pdf_from_db(invoice_number):
     conn.close()
     return data[0] if data else None
 
-# --- DB: Catalog Functions ---
 def get_catalog():
     conn = sqlite3.connect('invoices.db')
     df = pd.read_sql_query("SELECT * FROM product_catalog_v3", conn)
@@ -68,7 +65,6 @@ def upsert_catalog_from_df(df):
         desc = row.get('description', '')
         if pd.isna(desc) or desc == "":
             desc = p_name
-            
         c.execute("""INSERT OR REPLACE INTO product_catalog_v3 
                      (sku, product_name, description, hts_code, fda_code) 
                      VALUES (?, ?, ?, ?, ?)""",
@@ -138,60 +134,80 @@ def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship,
     pdf.cell(0, 10, doc_type, 0, 1, 'C')
     pdf.ln(5)
 
-    # --- INFO BLOCKS ---
+    # --- INFO BLOCKS (Strict X-Y Locking) ---
     pdf.set_font("Helvetica", '', 9)
-    y_top = pdf.get_y()
+    y_start = pdf.get_y()
     
-    # BLOCK 1: LEFT
-    pdf.set_xy(10, y_top)
+    # --- COLUMN 1: LEFT (X=10) ---
+    pdf.set_xy(10, y_start)
     pdf.set_font("Helvetica", 'B', 10)
     lbl_from = "SHIPPER / EXPORTER:" if "COMMERCIAL" in doc_type else "FROM (SELLER):"
     if "PURCHASE" in doc_type: lbl_from = "FROM (BUYER):"
-    pdf.cell(65, 5, lbl_from, 0, 1)
+    
+    pdf.cell(70, 5, lbl_from, 0, 1) # This moves cursor to next line, left margin
+    
+    # Force cursor back to X=10 for the address body
+    pdf.set_x(10) 
     pdf.set_font("Helvetica", '', 9)
-    pdf.multi_cell(65, 4, addr_from)
+    pdf.multi_cell(70, 4, addr_from)
     y_end_1 = pdf.get_y()
 
-    # BLOCK 2: CENTER
-    pdf.set_xy(80, y_top)
+    # --- COLUMN 2: CENTER (X=90) ---
+    # We explicitly move to X=90, Y=y_start for the header
+    pdf.set_xy(90, y_start) 
     pdf.set_font("Helvetica", 'B', 10)
     lbl_to = "CONSIGNEE (SHIP TO):" if "COMMERCIAL" in doc_type else "SHIP TO:"
-    pdf.cell(65, 5, lbl_to, 0, 1)
+    
+    pdf.cell(70, 5, lbl_to, 0, 1) # Moves to next line
+    
+    # Crucial Fix: Force cursor back to X=90 for the address body
+    pdf.set_xy(90, pdf.get_y()) 
     pdf.set_font("Helvetica", '', 9)
-    pdf.multi_cell(65, 4, addr_ship)
+    pdf.multi_cell(70, 4, addr_ship)
     y_end_2 = pdf.get_y()
 
-    # BLOCK 3: RIGHT
-    x_right = 150
-    pdf.set_xy(x_right, y_top)
+    # --- COLUMN 3: RIGHT (X=160) ---
+    x_right = 160
+    pdf.set_xy(x_right, y_start)
     pdf.set_font("Helvetica", 'B', 12)
-    pdf.cell(50, 6, f"Ref #: {inv_num}", 0, 0, 'R'); pdf.ln(6)
-    pdf.set_xy(x_right, pdf.get_y())
+    pdf.cell(40, 6, f"Ref #: {inv_num}", 0, 1, 'R')
+    
+    pdf.set_x(x_right) # Lock X
     pdf.set_font("Helvetica", '', 10)
-    pdf.cell(50, 6, f"Date: {inv_date}", 0, 0, 'R'); pdf.ln(6)
-    pdf.set_xy(x_right, pdf.get_y())
-    pdf.cell(50, 6, "Currency: USD", 0, 0, 'R'); pdf.ln(6)
+    pdf.cell(40, 6, f"Date: {inv_date}", 0, 1, 'R')
+    
+    pdf.set_x(x_right) # Lock X
+    pdf.cell(40, 6, "Currency: USD", 0, 1, 'R')
+    
     if "COMMERCIAL" in doc_type:
-        pdf.set_xy(x_right, pdf.get_y())
-        pdf.cell(50, 6, "Origin: CANADA", 0, 0, 'R'); pdf.ln(6)
+        pdf.set_x(x_right) # Lock X
+        pdf.cell(40, 6, "Origin: CANADA", 0, 1, 'R')
+    
     y_end_3 = pdf.get_y()
 
-    # --- ROW 2 ---
-    y_mid = max(y_end_1, y_end_2, y_end_3) + 8
+    # --- ROW 2: BILL TO / NOTES ---
+    y_mid = max(y_end_1, y_end_2, y_end_3) + 10
+    
+    # Left: Bill To
     pdf.set_xy(10, y_mid)
     pdf.set_font("Helvetica", 'B', 10)
     lbl_bill = "IMPORTER OF RECORD:" if "COMMERCIAL" in doc_type else "BILL TO:"
     if "PURCHASE" in doc_type: lbl_bill = "TO (VENDOR):"
+    
     pdf.cell(80, 5, lbl_bill, 0, 1)
+    pdf.set_x(10)
     pdf.set_font("Helvetica", '', 9)
     pdf.multi_cell(80, 4, addr_to)
     
+    # Right: Notes Box
     pdf.set_xy(100, y_mid)
     pdf.set_fill_color(245, 245, 245)
     pdf.rect(100, y_mid, 95, 30, 'F')
+    
     pdf.set_xy(102, y_mid + 2)
     pdf.set_font("Helvetica", 'B', 9)
     pdf.cell(50, 5, "NOTES / BROKER / FDA:", 0, 1)
+    
     pdf.set_xy(102, pdf.get_y())
     pdf.set_font("Helvetica", '', 8)
     pdf.multi_cell(90, 4, notes)
@@ -199,11 +215,11 @@ def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship,
     pdf.set_y(y_mid + 35)
 
     # --- TABLE ---
-    # Widths: Qty(12), Product(40), Desc(45), HTS(23), FDA(23), Unit(22), Total(25) = 190
+    # Widths: Qty(12), Prod(40), Desc(45), HTS(23), FDA(23), Unit(22), Tot(25)
     w = [12, 40, 45, 23, 23, 22, 25]
     headers = ["QTY", "PRODUCT", "DESCRIPTION", "HTS #", "FDA CODE", "UNIT ($)", "TOTAL ($)"]
     
-    pdf.set_font("Helvetica", 'B', 7) # Smaller font to fit everything
+    pdf.set_font("Helvetica", 'B', 7)
     pdf.set_fill_color(220, 220, 220)
     for i, h in enumerate(headers):
         pdf.cell(w[i], 8, h, 1, 0, 'C', fill=True)
@@ -213,8 +229,8 @@ def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship,
     
     for _, row in df.iterrows():
         qty = str(int(row['Quantity']))
-        prod_name = str(row['Product Name'])[:25] # Limit length
-        desc = str(row['Description'])[:45]       # Limit length
+        prod_name = str(row['Product Name'])[:25]
+        desc = str(row['Description'])[:45]
         
         hts = str(row.get('HTS Code', '') or '')
         fda = str(row.get('FDA Code', '') or '')
@@ -266,24 +282,18 @@ with tab_generate:
             if 'Item type' in df.columns:
                 us_shipments = us_shipments[us_shipments['Item type'] == 'product']
             
-            # --- MERGE LOGIC WITH CATALOG ---
-            # 1. Prepare raw sales data
+            # --- MERGE LOGIC ---
             sales_data = us_shipments[['Variant code / SKU', 'Item variant', 'Quantity', 'Price per unit']].copy()
             sales_data['Variant code / SKU'] = sales_data['Variant code / SKU'].astype(str)
             
-            # 2. Load Catalog
             catalog = get_catalog()
             
             if not catalog.empty:
                 catalog['sku'] = catalog['sku'].astype(str)
                 merged = pd.merge(sales_data, catalog, left_on='Variant code / SKU', right_on='sku', how='left')
                 
-                # 3. Fill values
-                # Product Name: Catalog Name -> Item Variant
                 merged['Final Product Name'] = merged['product_name'].fillna(merged['Item variant'])
-                # Description: Catalog Description -> Catalog Name -> Item Variant
                 merged['Final Desc'] = merged['description'].fillna(merged['product_name']).fillna(merged['Item variant'])
-                
                 merged['Final HTS'] = merged['hts_code'].fillna(DEFAULT_HTS)
                 merged['Final FDA'] = merged['fda_code'].fillna(DEFAULT_FDA)
                 processed = merged.copy()
@@ -294,11 +304,9 @@ with tab_generate:
                 processed['Final HTS'] = DEFAULT_HTS
                 processed['Final FDA'] = DEFAULT_FDA
             
-            # 4. Calculations
             processed['Transfer Price (Unit)'] = processed['Price per unit'] * (1 - discount_rate/100.0)
             processed['Transfer Total'] = processed['Quantity'] * processed['Transfer Price (Unit)']
             
-            # 5. Consolidate (Group by SKU, ProdName, Description)
             consolidated = processed.groupby(['Variant code / SKU', 'Final Product Name', 'Final Desc']).agg({
                 'Quantity': 'sum',
                 'Final HTS': 'first',
@@ -307,7 +315,6 @@ with tab_generate:
                 'Transfer Total': 'sum'
             }).reset_index()
             
-            # RENAME FOR DISPLAY/PDF
             consolidated.rename(columns={
                 'Final Product Name': 'Product Name',
                 'Final Desc': 'Description', 
@@ -315,7 +322,6 @@ with tab_generate:
                 'Final FDA': 'FDA Code'
             }, inplace=True)
             
-            # 6. Editable Table
             st.info("👇 Review Line Items")
             edited_df = st.data_editor(
                 consolidated,
@@ -366,26 +372,22 @@ with tab_catalog:
     
     col_tools1, col_tools2, col_tools3 = st.columns(3)
     
-    # 1. Template
     with col_tools1:
         template_df = pd.DataFrame(columns=['sku', 'product_name', 'description', 'hts_code', 'fda_code'])
         csv_template = template_df.to_csv(index=False).encode('utf-8')
         st.download_button("📥 Download Empty Template", csv_template, "catalog_template.csv", "text/csv")
     
-    # 2. Download Current
-    current_catalog = get_catalog()
     with col_tools2:
+        current_catalog = get_catalog()
         if not current_catalog.empty:
             csv_current = current_catalog.to_csv(index=False).encode('utf-8')
             st.download_button("📥 Download Current Catalog", csv_current, "full_catalog.csv", "text/csv")
     
-    # 3. Clear DB
     with col_tools3:
         if st.button("⚠️ Clear Entire Catalog"):
             clear_catalog()
             st.rerun()
 
-    # Upload
     st.subheader("Upload Catalog (CSV)")
     cat_upload = st.file_uploader("Upload filled template to update catalog", type=['csv'])
     if cat_upload:
@@ -401,7 +403,6 @@ with tab_catalog:
         except Exception as e:
             st.error(f"Error: {e}")
 
-    # Editable View
     st.subheader("Edit Catalog Manually")
     if not current_catalog.empty:
         edited_catalog = st.data_editor(current_catalog, num_rows="dynamic", key="cat_editor")
