@@ -7,7 +7,7 @@ import io
 import re
 import tempfile
 import os
-import pytz  # For EST Timezone
+import pytz
 
 # --- Database Setup (SQLite) ---
 def init_db():
@@ -44,23 +44,19 @@ def save_invoice_to_db(base_inv_num, total_val, buyer, pdf_ci, pdf_po, pdf_si):
         
         # 1. VERSION CONTROL LOGIC
         # Find all existing invoice numbers that start with this base number
-        # We look for exact match OR match with a hyphen suffix (e.g. INV-001-1)
         c.execute("SELECT invoice_number FROM invoice_history_v2 WHERE invoice_number LIKE ?", (base_inv_num + '%',))
         existing_nums = [row[0] for row in c.fetchall()]
         
-        # Calculate next version
         count = 0
         for num in existing_nums:
-            # Check if it matches pattern "INV-XXX" or "INV-XXX-{digit}"
             if num == base_inv_num:
                 count += 1
             elif num.startswith(base_inv_num + "-"):
                 count += 1
         
-        # The new unique ID for the archive
         new_version_num = f"{base_inv_num}-{count + 1}"
         
-        # 2. EST TIMESTAMP LOGIC
+        # 2. EST TIMESTAMP
         est = pytz.timezone('US/Eastern')
         timestamp = datetime.now(est).strftime("%Y-%m-%d %H:%M EST")
         
@@ -76,6 +72,7 @@ def save_invoice_to_db(base_inv_num, total_val, buyer, pdf_ci, pdf_po, pdf_si):
 
 def get_history():
     conn = sqlite3.connect('invoices.db')
+    # Fetch ID to link selection
     df = pd.read_sql_query("SELECT id, invoice_number, date_created, buyer_name, total_value FROM invoice_history_v2 ORDER BY id DESC", conn)
     conn.close()
     return df
@@ -355,7 +352,7 @@ with tab_generate:
             saved_sig = get_signature()
             if saved_sig:
                 st.success("✅ Signature on file")
-                if st.button("Clear Signature"):
+                if st.button("Clear Signature"): 
                     conn = sqlite3.connect('invoices.db')
                     conn.execute("DELETE FROM settings WHERE key='signature'")
                     conn.commit()
@@ -463,7 +460,7 @@ with tab_generate:
                 pdf_si = generate_pdf("SALES INVOICE", edited_df, inv_number, inv_date, 
                                       shipper_txt, importer_txt, consignee_txt, notes_txt, total_val, final_sig_bytes, signer_name)
                 
-                # Auto-save logic handles the versioning now (does not block download)
+                # Auto-save immediately upon generation
                 save_invoice_to_db(inv_number, total_val, importer_txt.split('\n')[0], pdf_ci, pdf_po, pdf_si)
 
                 # --- DOWNLOADS ---
@@ -531,37 +528,44 @@ with tab_catalog:
 # ================= TAB 3: HISTORY =================
 with tab_history:
     st.header("🗄️ Documents Archive")
+    st.markdown("Click on a row to reveal download buttons for that specific version.")
+    
     history_df = get_history()
     
-    # Show History Table
-    st.dataframe(history_df[['invoice_number', 'date_created', 'buyer_name', 'total_value']], use_container_width=True)
+    # Configure Interactive Table
+    event = st.dataframe(
+        history_df[['invoice_number', 'date_created', 'buyer_name', 'total_value']],
+        use_container_width=True,
+        hide_index=True,
+        on_select="rerun",
+        selection_mode="single-row"
+    )
     
-    # Create Selection Box with Time Info
-    inv_options = {}
-    for index, row in history_df.iterrows():
-        label = f"{row['invoice_number']} | {row['date_created']} | ${row['total_value']:.2f}"
-        inv_options[label] = row['id']
-    
-    if inv_options:
-        sel_label = st.selectbox("Select Version to Download:", list(inv_options.keys()))
-        sel_id = inv_options[sel_label]
+    # Handle Selection
+    if len(event.selection.rows) > 0:
+        selected_index = event.selection.rows[0]
+        # Get the ID from the actual dataframe using the index
+        selected_id = history_df.iloc[selected_index]['id']
+        selected_inv_num = history_df.iloc[selected_index]['invoice_number']
         
-        if st.button("Fetch Documents"):
-            ci, po, si = get_documents_by_id(sel_id)
-            inv_num_clean = sel_label.split(" | ")[0] # Extract INV number for filename
+        # Fetch Documents
+        ci, po, si = get_documents_by_id(selected_id)
+        
+        st.divider()
+        st.subheader(f"⬇️ Downloads for {selected_inv_num}")
+        
+        c_h1, c_h2, c_h3 = st.columns(3)
+        if ci:
+            with c_h1: st.download_button(f"📄 CI-{selected_inv_num}", ci, f"CI-{selected_inv_num}.pdf", "application/pdf")
+        else:
+            with c_h1: st.warning("CI not found")
+        
+        if po:
+            with c_h2: st.download_button(f"📄 PO-{selected_inv_num}", po, f"PO-{selected_inv_num}.pdf", "application/pdf")
+        else:
+            with c_h2: st.warning("PO not found")
             
-            c_h1, c_h2, c_h3 = st.columns(3)
-            if ci:
-                with c_h1: st.download_button(f"📄 CI-{inv_num_clean}", ci, f"CI-{inv_num_clean}.pdf", "application/pdf")
-            else:
-                with c_h1: st.warning("CI not found")
-            
-            if po:
-                with c_h2: st.download_button(f"📄 PO-{inv_num_clean}", po, f"PO-{inv_num_clean}.pdf", "application/pdf")
-            else:
-                with c_h2: st.warning("PO not found")
-                
-            if si:
-                with c_h3: st.download_button(f"📄 SI-{inv_num_clean}", si, f"SI-{inv_num_clean}.pdf", "application/pdf")
-            else:
-                with c_h3: st.warning("SI not found")
+        if si:
+            with c_h3: st.download_button(f"📄 SI-{selected_inv_num}", si, f"SI-{selected_inv_num}.pdf", "application/pdf")
+        else:
+            with c_h3: st.warning("SI not found")
