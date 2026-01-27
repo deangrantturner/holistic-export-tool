@@ -20,7 +20,7 @@ def init_db():
                   pdf_data BLOB,
                   buyer_name TEXT)''')
     
-    # Catalog Table V3 (Removed Weight)
+    # Catalog Table V3
     c.execute('''CREATE TABLE IF NOT EXISTS product_catalog_v3
                  (sku TEXT PRIMARY KEY,
                   product_name TEXT,
@@ -199,21 +199,22 @@ def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship,
     pdf.set_y(y_mid + 35)
 
     # --- TABLE ---
-    # Widths: Qty(15), Desc(80), HTS(25), FDA(25), Price(22), Total(23) = 190
-    w = [15, 80, 25, 25, 22, 23]
-    headers = ["QTY", "DESCRIPTION", "HTS #", "FDA CODE", "UNIT ($)", "TOTAL ($)"]
-    pdf.set_font("Helvetica", 'B', 8)
+    # Widths: Qty(12), Product(40), Desc(45), HTS(23), FDA(23), Unit(22), Total(25) = 190
+    w = [12, 40, 45, 23, 23, 22, 25]
+    headers = ["QTY", "PRODUCT", "DESCRIPTION", "HTS #", "FDA CODE", "UNIT ($)", "TOTAL ($)"]
+    
+    pdf.set_font("Helvetica", 'B', 7) # Smaller font to fit everything
     pdf.set_fill_color(220, 220, 220)
     for i, h in enumerate(headers):
         pdf.cell(w[i], 8, h, 1, 0, 'C', fill=True)
     pdf.ln()
     
-    pdf.set_font("Helvetica", '', 8)
+    pdf.set_font("Helvetica", '', 7)
     
     for _, row in df.iterrows():
         qty = str(int(row['Quantity']))
-        # FIX: The dataframe column is 'Item variant' after renaming, not 'Final Desc'
-        desc = str(row['Item variant'])[:60] 
+        prod_name = str(row['Product Name'])[:25] # Limit length
+        desc = str(row['Description'])[:45]       # Limit length
         
         hts = str(row.get('HTS Code', '') or '')
         fda = str(row.get('FDA Code', '') or '')
@@ -221,14 +222,15 @@ def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship,
         tot = f"{row['Transfer Total']:.2f}"
         
         pdf.cell(w[0], 6, qty, 1, 0, 'C')
-        pdf.cell(w[1], 6, desc, 1, 0, 'L')
-        pdf.cell(w[2], 6, hts, 1, 0, 'C')
-        pdf.cell(w[3], 6, fda, 1, 0, 'C')
-        pdf.cell(w[4], 6, price, 1, 0, 'R')
-        pdf.cell(w[5], 6, tot, 1, 1, 'R')
+        pdf.cell(w[1], 6, prod_name, 1, 0, 'L')
+        pdf.cell(w[2], 6, desc, 1, 0, 'L')
+        pdf.cell(w[3], 6, hts, 1, 0, 'C')
+        pdf.cell(w[4], 6, fda, 1, 0, 'C')
+        pdf.cell(w[5], 6, price, 1, 0, 'R')
+        pdf.cell(w[6], 6, tot, 1, 1, 'R')
 
     pdf.ln(2)
-    pdf.set_font("Helvetica", 'B', 10)
+    pdf.set_font("Helvetica", 'B', 9)
     pdf.set_x(10)
     pdf.cell(sum(w[:-1]), 8, "TOTAL VALUE (USD):", 0, 0, 'R')
     pdf.cell(w[-1], 8, f"${total_val:,.2f}", 1, 1, 'R')
@@ -277,12 +279,17 @@ with tab_generate:
                 merged = pd.merge(sales_data, catalog, left_on='Variant code / SKU', right_on='sku', how='left')
                 
                 # 3. Fill values
+                # Product Name: Catalog Name -> Item Variant
+                merged['Final Product Name'] = merged['product_name'].fillna(merged['Item variant'])
+                # Description: Catalog Description -> Catalog Name -> Item Variant
                 merged['Final Desc'] = merged['description'].fillna(merged['product_name']).fillna(merged['Item variant'])
+                
                 merged['Final HTS'] = merged['hts_code'].fillna(DEFAULT_HTS)
                 merged['Final FDA'] = merged['fda_code'].fillna(DEFAULT_FDA)
                 processed = merged.copy()
             else:
                 processed = sales_data.copy()
+                processed['Final Product Name'] = processed['Item variant']
                 processed['Final Desc'] = processed['Item variant']
                 processed['Final HTS'] = DEFAULT_HTS
                 processed['Final FDA'] = DEFAULT_FDA
@@ -291,8 +298,8 @@ with tab_generate:
             processed['Transfer Price (Unit)'] = processed['Price per unit'] * (1 - discount_rate/100.0)
             processed['Transfer Total'] = processed['Quantity'] * processed['Transfer Price (Unit)']
             
-            # 5. Consolidate
-            consolidated = processed.groupby(['Variant code / SKU', 'Final Desc']).agg({
+            # 5. Consolidate (Group by SKU, ProdName, Description)
+            consolidated = processed.groupby(['Variant code / SKU', 'Final Product Name', 'Final Desc']).agg({
                 'Quantity': 'sum',
                 'Final HTS': 'first',
                 'Final FDA': 'first',
@@ -300,15 +307,16 @@ with tab_generate:
                 'Transfer Total': 'sum'
             }).reset_index()
             
-            # RENAME FOR DISPLAY (This was causing the bug! Now the PDF generator knows this name)
+            # RENAME FOR DISPLAY/PDF
             consolidated.rename(columns={
-                'Final Desc': 'Item variant', 
+                'Final Product Name': 'Product Name',
+                'Final Desc': 'Description', 
                 'Final HTS': 'HTS Code', 
                 'Final FDA': 'FDA Code'
             }, inplace=True)
             
             # 6. Editable Table
-            st.info("👇 Review Line Items (Auto-filled from Catalog)")
+            st.info("👇 Review Line Items")
             edited_df = st.data_editor(
                 consolidated,
                 column_config={
@@ -353,14 +361,13 @@ with tab_generate:
 
 # ================= TAB 2: PRODUCT CATALOG =================
 with tab_catalog:
-    st.header("📦 Product Catalog (Master List)")
-    st.markdown("Auto-fill Invoice Descriptions, HTS, and FDA codes by SKU.")
+    st.header("📦 Product Catalog")
+    st.markdown("Auto-fill details by SKU.")
     
     col_tools1, col_tools2, col_tools3 = st.columns(3)
     
     # 1. Template
     with col_tools1:
-        # Removed Weight from Template
         template_df = pd.DataFrame(columns=['sku', 'product_name', 'description', 'hts_code', 'fda_code'])
         csv_template = template_df.to_csv(index=False).encode('utf-8')
         st.download_button("📥 Download Empty Template", csv_template, "catalog_template.csv", "text/csv")
