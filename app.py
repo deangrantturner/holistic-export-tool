@@ -3,7 +3,6 @@ import pandas as pd
 import sqlite3
 from fpdf import FPDF
 from datetime import date
-import base64
 import io
 import re
 
@@ -273,16 +272,14 @@ with tab_generate:
         try:
             df = pd.read_csv(uploaded_file)
             
-            # --- VALIDATION: Check for Correct CSV ---
             if 'Ship to country' not in df.columns:
-                st.error("⚠️ Error: Column 'Ship to country' not found. Did you upload the Product Catalog by mistake? Please upload the Sales Order CSV.")
+                st.error("⚠️ Error: Column 'Ship to country' not found. Did you upload the Product Catalog by mistake?")
             else:
                 us_shipments = df[df['Ship to country'] == 'United States'].copy()
                 if 'Item type' in df.columns:
                     us_shipments = us_shipments[us_shipments['Item type'] == 'product']
                 
                 # --- PREPARE DATA ---
-                # Check for Discount column
                 if 'Discount' not in us_shipments.columns:
                     us_shipments['Discount'] = "0%"
 
@@ -306,19 +303,16 @@ with tab_generate:
                     processed['Final HTS'] = DEFAULT_HTS
                     processed['Final FDA'] = DEFAULT_FDA
                 
-                # --- MATH: HANDLING EXISTING DISCOUNTS ---
-                # 1. Clean Discount Column (Remove % and convert to float)
+                # --- MATH: ORIGINAL RETAIL & DISCOUNT ---
                 processed['Discount_Float'] = processed['Discount'].astype(str).str.replace('%', '', regex=False)
                 processed['Discount_Float'] = pd.to_numeric(processed['Discount_Float'], errors='coerce').fillna(0) / 100.0
                 
-                # 2. Calculate Original Retail Price
-                # Formula: Current Price / (1 - Current Discount)
-                # Avoid division by zero: if discount is 100% (1.0), set retail to 0 (or keep current price)
+                # Calculate True Retail Price (Backing out any promo discounts)
                 processed['Original_Retail'] = processed.apply(
                     lambda row: row['Price per unit'] / (1 - row['Discount_Float']) if row['Discount_Float'] < 1.0 else 0, axis=1
                 )
                 
-                # 3. Calculate New Transfer Price based on App Setting
+                # Calculate Transfer Price from True Retail
                 app_discount_decimal = discount_rate / 100.0
                 processed['Transfer Price (Unit)'] = processed['Original_Retail'] * (1 - app_discount_decimal)
                 processed['Transfer Total'] = processed['Quantity'] * processed['Transfer Price (Unit)']
@@ -332,7 +326,6 @@ with tab_generate:
                     'Transfer Total': 'sum'
                 }).reset_index()
                 
-                # Rename for Display
                 consolidated.rename(columns={
                     'Final Product Name': 'Product Name',
                     'Final Desc': 'Description', 
@@ -352,35 +345,27 @@ with tab_generate:
                 )
                 total_val = edited_df['Transfer Total'].sum()
 
-                # --- PREVIEW TABS ---
-                st.subheader("🖨️ Document Preview & Download")
-                d_tab1, d_tab2, d_tab3 = st.tabs(["Commercial Invoice", "Purchase Order", "Sales Invoice"])
+                # --- DOWNLOADS ---
+                st.subheader("🖨️ Download Documents")
+                col_d1, col_d2, col_d3 = st.columns(3)
 
-                with d_tab1:
+                with col_d1:
                     pdf_ci = generate_pdf("COMMERCIAL INVOICE", edited_df, inv_number, inv_date, 
                                           shipper_txt, importer_txt, consignee_txt, notes_txt, total_val)
-                    col_a, col_b = st.columns([1, 4])
-                    with col_a:
-                        st.download_button("📥 PDF", pdf_ci, file_name=f"CI-{inv_number}.pdf", mime="application/pdf")
-                        if st.button("💾 Save", key="s_ci"): 
-                            save_invoice_to_db(inv_number, total_val, pdf_ci, importer_txt.split('\n')[0])
-                            st.success("Saved!")
-                    b64_ci = base64.b64encode(pdf_ci).decode('utf-8')
-                    st.markdown(f'<iframe src="data:application/pdf;base64,{b64_ci}" width="100%" height="600"></iframe>', unsafe_allow_html=True)
-                
-                with d_tab2:
+                    st.download_button("📄 Download Commercial Invoice", pdf_ci, file_name=f"CI-{inv_number}.pdf", mime="application/pdf")
+                    if st.button("💾 Save to History", key="save_ci"):
+                        save_invoice_to_db(inv_number, total_val, pdf_ci, importer_txt.split('\n')[0])
+                        st.success("Saved!")
+
+                with col_d2:
                     pdf_po = generate_pdf("PURCHASE ORDER", edited_df, inv_number, inv_date, 
                                           importer_txt, shipper_txt, consignee_txt, notes_txt, total_val)
-                    st.download_button("📥 PDF", pdf_po, file_name=f"PO-{inv_number}.pdf", mime="application/pdf")
-                    b64_po = base64.b64encode(pdf_po).decode('utf-8')
-                    st.markdown(f'<iframe src="data:application/pdf;base64,{b64_po}" width="100%" height="600"></iframe>', unsafe_allow_html=True)
-                
-                with d_tab3:
+                    st.download_button("📄 Download Purchase Order", pdf_po, file_name=f"PO-{inv_number}.pdf", mime="application/pdf")
+
+                with col_d3:
                     pdf_si = generate_pdf("SALES INVOICE", edited_df, inv_number, inv_date, 
                                           shipper_txt, importer_txt, consignee_txt, notes_txt, total_val)
-                    st.download_button("📥 PDF", pdf_si, file_name=f"SI-{inv_number}.pdf", mime="application/pdf")
-                    b64_si = base64.b64encode(pdf_si).decode('utf-8')
-                    st.markdown(f'<iframe src="data:application/pdf;base64,{b64_si}" width="100%" height="600"></iframe>', unsafe_allow_html=True)
+                    st.download_button("📄 Download Sales Invoice", pdf_si, file_name=f"SI-{inv_number}.pdf", mime="application/pdf")
 
         except Exception as e:
             st.error(f"Processing Error: {e}")
