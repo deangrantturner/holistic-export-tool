@@ -86,7 +86,8 @@ def create_pdf(dataframe, doc_title, sender_text, receiver_text, total_value):
     pdf.cell(165, 10, "Total (USD):", 0, 0, 'R')
     pdf.cell(25, 10, f"${total_value:.2f}", 0, 1, 'R')
     
-    return pdf.output() # Returns PDF bytes
+    # --- THE FIX IS HERE: Convert to bytes ---
+    return bytes(pdf.output())
 
 # --- Logic ---
 def process_data(df, discount_pct):
