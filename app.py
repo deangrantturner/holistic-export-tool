@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import sqlite3
 from fpdf import FPDF
-from datetime import datetime
+from datetime import datetime, date  # FIXED: Added 'date' back
 import io
 import re
 import tempfile
@@ -57,10 +57,9 @@ def save_invoice_callback(base_inv_num, total_val, buyer, pdf_ci, pdf_po, pdf_si
             elif num.startswith(base_inv_num + "-"):
                 count += 1
         
-        # If versions exist, append suffix. If not, use base.
-        # Actually, user requested adding a digit for every new version.
+        # Append digit for new versions
         if count == 0:
-            new_version_num = base_inv_num # First time
+            new_version_num = base_inv_num 
         else:
             new_version_num = f"{base_inv_num}-{count}"
         
@@ -332,6 +331,7 @@ def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship,
 
 # ================= TAB 1: GENERATE DOCUMENTS =================
 with tab_generate:
+    # --- CONFIGURATION EXPANDER ---
     with st.expander("📝 Invoice Details, Addresses & Signature", expanded=True):
         c1, c2, c3 = st.columns(3)
         with c1:
@@ -460,7 +460,7 @@ with tab_generate:
                 
                 col_d1, col_d2, col_d3 = st.columns(3)
                 
-                # We use args to pass the data to the save callback
+                # Pass data to callback
                 save_args = (inv_number, total_val, importer_txt.split('\n')[0], pdf_ci, pdf_po, pdf_si)
                 
                 with col_d1:
