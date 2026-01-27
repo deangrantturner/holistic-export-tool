@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 from fpdf import FPDF
 from datetime import date
@@ -14,10 +15,13 @@ uploaded_file = st.sidebar.file_uploader("Upload CSV File", type=['csv'])
 discount_rate_percent = st.sidebar.slider("Intercompany Discount (%)", min_value=0, max_value=100, value=50, step=1)
 
 # Document Addresses
-SENDER_CA = "Holistic Roasters Canada<br>123 Roastery Lane<br>Montreal, QC, Canada"
-ENTITY_US = "Holistic Roasters USA<br>456 Warehouse Blvd<br>New York, NY, USA"
-SENDER_CA_PDF = SENDER_CA.replace("<br>", "\n")
-ENTITY_US_PDF = ENTITY_US.replace("<br>", "\n")
+# HTML version (for Preview) uses <br>
+SENDER_CA_HTML = "Holistic Roasters Canada<br>123 Roastery Lane<br>Montreal, QC, Canada"
+ENTITY_US_HTML = "Holistic Roasters USA<br>456 Warehouse Blvd<br>New York, NY, USA"
+
+# PDF version (for Download) uses \n
+SENDER_CA_PDF = "Holistic Roasters Canada\n123 Roastery Lane\nMontreal, QC, Canada"
+ENTITY_US_PDF = "Holistic Roasters USA\n456 Warehouse Blvd\nNew York, NY, USA"
 
 # --- PDF Generation Class ---
 class PDF(FPDF):
@@ -87,9 +91,8 @@ def create_pdf(dataframe, doc_title, sender_text, receiver_text, total_value):
     
     return bytes(pdf.output())
 
-# --- HTML Preview Generator (Browser Safe) ---
+# --- HTML Preview Generator ---
 def create_html_preview(dataframe, title, sender, receiver, total_val):
-    # Convert dataframe rows to HTML table rows
     rows_html = ""
     for _, row in dataframe.iterrows():
         rows_html += f"""
@@ -102,7 +105,6 @@ def create_html_preview(dataframe, title, sender, receiver, total_val):
         </tr>
         """
     
-    # Full HTML Template
     html = f"""
     <div style="font-family: Helvetica, Arial, sans-serif; border: 1px solid #ddd; padding: 20px; border-radius: 5px; background-color: white; color: black;">
         <div style="display: flex; justify-content: space-between; margin-bottom: 20px;">
@@ -145,27 +147,7 @@ def create_html_preview(dataframe, title, sender, receiver, total_val):
     """
     return html
 
-# --- Logic ---
-def process_data(df, discount_pct):
-    us_shipments = df[df['Ship to country'] == 'United States'].copy()
-    if 'Item type' in df.columns:
-        us_shipments = us_shipments[us_shipments['Item type'] == 'product']
-
-    cols = ['Variant code / SKU', 'Item variant', 'Quantity', 'Price per unit']
-    processed = us_shipments[cols].copy()
-    
-    processed['Transfer Price (Unit)'] = processed['Price per unit'] * (1 - discount_pct/100.0)
-    processed['Transfer Total'] = processed['Quantity'] * processed['Transfer Price (Unit)']
-    
-    consolidated = processed.groupby(['Variant code / SKU', 'Item variant']).agg({
-        'Quantity': 'sum',
-        'Transfer Price (Unit)': 'mean',
-        'Transfer Total': 'sum'
-    }).reset_index()
-    
-    return consolidated
-
-# --- Main App ---
+# --- Main App Logic ---
 if uploaded_file:
     try:
         df = pd.read_csv(uploaded_file)
@@ -173,31 +155,59 @@ if uploaded_file:
         if 'Ship to country' not in df.columns:
             st.error("Error: CSV missing 'Ship to country' column.")
         else:
-            invoice_data = process_data(df, discount_rate_percent)
+            # Logic
+            us_shipments = df[df['Ship to country'] == 'United States'].copy()
+            if 'Item type' in df.columns:
+                us_shipments = us_shipments[us_shipments['Item type'] == 'product']
+
+            cols = ['Variant code / SKU', 'Item variant', 'Quantity', 'Price per unit']
+            processed = us_shipments[cols].copy()
+            
+            processed['Transfer Price (Unit)'] = processed['Price per unit'] * (1 - discount_rate_percent/100.0)
+            processed['Transfer Total'] = processed['Quantity'] * processed['Transfer Price (Unit)']
+            
+            invoice_data = processed.groupby(['Variant code / SKU', 'Item variant']).agg({
+                'Quantity': 'sum',
+                'Transfer Price (Unit)': 'mean',
+                'Transfer Total': 'sum'
+            }).reset_index()
+            
             total_val = invoice_data['Transfer Total'].sum()
             
             st.success("✅ Data Processed Successfully!")
             
-            # Create PDFs for Downloading (Uses SENDER_CA_PDF with \n)
+            # Create PDFs (For Download)
             pdf_po = create_pdf(invoice_data, "PURCHASE ORDER", ENTITY_US_PDF, SENDER_CA_PDF, total_val)
             pdf_ci = create_pdf(invoice_data, "COMMERCIAL INVOICE", SENDER_CA_PDF, ENTITY_US_PDF, total_val)
             pdf_si = create_pdf(invoice_data, "SALES INVOICE", SENDER_CA_PDF, ENTITY_US_PDF, total_val)
 
+            # Create HTML Strings (For Preview)
+            html_po = create_html_preview(invoice_data, "PURCHASE ORDER", ENTITY_US_HTML, SENDER_CA_HTML, total_val)
+            html_ci = create_html_preview(invoice_data, "COMMERCIAL INVOICE", SENDER_CA_HTML, ENTITY_US_HTML, total_val)
+            html_si = create_html_preview(invoice_data, "SALES INVOICE", SENDER_CA_HTML, ENTITY_US_HTML, total_val)
+
+            # --- TABS Interface ---
             st.subheader("Document Preview & Download")
             tab1, tab2, tab3 = st.tabs(["Purchase Order", "Commercial Invoice", "Sales Invoice"])
 
-            # Render HTML Previews (Uses SENDER_CA with <br>)
             with tab1:
-                st.download_button("📥 Download PDF", pdf_po, file_name=f"Purchase_Order_{date.today()}.pdf", mime="application/pdf")
-                st.markdown(create_html_preview(invoice_data, "PURCHASE ORDER", ENTITY_US, SENDER_CA, total_val), unsafe_allow_html=True)
-            
+                col_a, col_b = st.columns([1, 4])
+                with col_a:
+                    st.download_button("📥 PDF", pdf_po, file_name=f"Purchase_Order_{date.today()}.pdf", mime="application/pdf")
+                # THE FIX: Using components.html instead of st.markdown
+                components.html(html_po, height=600, scrolling=True)
+
             with tab2:
-                st.download_button("📥 Download PDF", pdf_ci, file_name=f"Commercial_Invoice_{date.today()}.pdf", mime="application/pdf")
-                st.markdown(create_html_preview(invoice_data, "COMMERCIAL INVOICE", SENDER_CA, ENTITY_US, total_val), unsafe_allow_html=True)
+                col_a, col_b = st.columns([1, 4])
+                with col_a:
+                    st.download_button("📥 PDF", pdf_ci, file_name=f"Commercial_Invoice_{date.today()}.pdf", mime="application/pdf")
+                components.html(html_ci, height=600, scrolling=True)
 
             with tab3:
-                st.download_button("📥 Download PDF", pdf_si, file_name=f"Sales_Invoice_{date.today()}.pdf", mime="application/pdf")
-                st.markdown(create_html_preview(invoice_data, "SALES INVOICE", SENDER_CA, ENTITY_US, total_val), unsafe_allow_html=True)
+                col_a, col_b = st.columns([1, 4])
+                with col_a:
+                    st.download_button("📥 PDF", pdf_si, file_name=f"Sales_Invoice_{date.today()}.pdf", mime="application/pdf")
+                components.html(html_si, height=600, scrolling=True)
 
     except Exception as e:
         st.error(f"An error occurred: {e}")
