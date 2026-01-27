@@ -138,49 +138,44 @@ def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship,
     pdf.set_font("Helvetica", '', 9)
     y_start = pdf.get_y()
     
-    # --- COLUMN 1: LEFT (X=10) ---
+    # --- COLUMN 1: LEFT ---
     pdf.set_xy(10, y_start)
     pdf.set_font("Helvetica", 'B', 10)
     lbl_from = "SHIPPER / EXPORTER:" if "COMMERCIAL" in doc_type else "FROM (SELLER):"
     if "PURCHASE" in doc_type: lbl_from = "FROM (BUYER):"
     
-    pdf.cell(70, 5, lbl_from, 0, 1) # This moves cursor to next line, left margin
-    
-    # Force cursor back to X=10 for the address body
+    pdf.cell(70, 5, lbl_from, 0, 1)
     pdf.set_x(10) 
     pdf.set_font("Helvetica", '', 9)
     pdf.multi_cell(70, 4, addr_from)
     y_end_1 = pdf.get_y()
 
-    # --- COLUMN 2: CENTER (X=90) ---
-    # We explicitly move to X=90, Y=y_start for the header
+    # --- COLUMN 2: CENTER ---
     pdf.set_xy(90, y_start) 
     pdf.set_font("Helvetica", 'B', 10)
     lbl_to = "CONSIGNEE (SHIP TO):" if "COMMERCIAL" in doc_type else "SHIP TO:"
     
-    pdf.cell(70, 5, lbl_to, 0, 1) # Moves to next line
-    
-    # Crucial Fix: Force cursor back to X=90 for the address body
+    pdf.cell(70, 5, lbl_to, 0, 1)
     pdf.set_xy(90, pdf.get_y()) 
     pdf.set_font("Helvetica", '', 9)
     pdf.multi_cell(70, 4, addr_ship)
     y_end_2 = pdf.get_y()
 
-    # --- COLUMN 3: RIGHT (X=160) ---
+    # --- COLUMN 3: RIGHT ---
     x_right = 160
     pdf.set_xy(x_right, y_start)
     pdf.set_font("Helvetica", 'B', 12)
     pdf.cell(40, 6, f"Ref #: {inv_num}", 0, 1, 'R')
     
-    pdf.set_x(x_right) # Lock X
+    pdf.set_x(x_right)
     pdf.set_font("Helvetica", '', 10)
     pdf.cell(40, 6, f"Date: {inv_date}", 0, 1, 'R')
     
-    pdf.set_x(x_right) # Lock X
+    pdf.set_x(x_right)
     pdf.cell(40, 6, "Currency: USD", 0, 1, 'R')
     
     if "COMMERCIAL" in doc_type:
-        pdf.set_x(x_right) # Lock X
+        pdf.set_x(x_right)
         pdf.cell(40, 6, "Origin: CANADA", 0, 1, 'R')
     
     y_end_3 = pdf.get_y()
@@ -215,7 +210,6 @@ def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship,
     pdf.set_y(y_mid + 35)
 
     # --- TABLE ---
-    # Widths: Qty(12), Prod(40), Desc(45), HTS(23), FDA(23), Unit(22), Tot(25)
     w = [12, 40, 45, 23, 23, 22, 25]
     headers = ["QTY", "PRODUCT", "DESCRIPTION", "HTS #", "FDA CODE", "UNIT ($)", "TOTAL ($)"]
     
@@ -264,7 +258,7 @@ with tab_generate:
         with c1:
             inv_number = st.text_input("Invoice #", value=f"INV-{date.today().strftime('%Y%m%d')}")
             inv_date = st.date_input("Date", value=date.today())
-            discount_rate = st.slider("Discount %", 0, 100, 50)
+            discount_rate = st.slider("Target Transfer Discount %", 0, 100, 50)
         with c2:
             shipper_txt = st.text_area("Shipper / Exporter", value=DEFAULT_SHIPPER, height=120)
             importer_txt = st.text_area("Importer (Bill To)", value=DEFAULT_IMPORTER, height=100)
@@ -278,89 +272,115 @@ with tab_generate:
     if uploaded_file:
         try:
             df = pd.read_csv(uploaded_file)
-            us_shipments = df[df['Ship to country'] == 'United States'].copy()
-            if 'Item type' in df.columns:
-                us_shipments = us_shipments[us_shipments['Item type'] == 'product']
             
-            # --- MERGE LOGIC ---
-            sales_data = us_shipments[['Variant code / SKU', 'Item variant', 'Quantity', 'Price per unit']].copy()
-            sales_data['Variant code / SKU'] = sales_data['Variant code / SKU'].astype(str)
-            
-            catalog = get_catalog()
-            
-            if not catalog.empty:
-                catalog['sku'] = catalog['sku'].astype(str)
-                merged = pd.merge(sales_data, catalog, left_on='Variant code / SKU', right_on='sku', how='left')
-                
-                merged['Final Product Name'] = merged['product_name'].fillna(merged['Item variant'])
-                merged['Final Desc'] = merged['description'].fillna(merged['product_name']).fillna(merged['Item variant'])
-                merged['Final HTS'] = merged['hts_code'].fillna(DEFAULT_HTS)
-                merged['Final FDA'] = merged['fda_code'].fillna(DEFAULT_FDA)
-                processed = merged.copy()
+            # --- VALIDATION: Check for Correct CSV ---
+            if 'Ship to country' not in df.columns:
+                st.error("⚠️ Error: Column 'Ship to country' not found. Did you upload the Product Catalog by mistake? Please upload the Sales Order CSV.")
             else:
-                processed = sales_data.copy()
-                processed['Final Product Name'] = processed['Item variant']
-                processed['Final Desc'] = processed['Item variant']
-                processed['Final HTS'] = DEFAULT_HTS
-                processed['Final FDA'] = DEFAULT_FDA
-            
-            processed['Transfer Price (Unit)'] = processed['Price per unit'] * (1 - discount_rate/100.0)
-            processed['Transfer Total'] = processed['Quantity'] * processed['Transfer Price (Unit)']
-            
-            consolidated = processed.groupby(['Variant code / SKU', 'Final Product Name', 'Final Desc']).agg({
-                'Quantity': 'sum',
-                'Final HTS': 'first',
-                'Final FDA': 'first',
-                'Transfer Price (Unit)': 'mean',
-                'Transfer Total': 'sum'
-            }).reset_index()
-            
-            consolidated.rename(columns={
-                'Final Product Name': 'Product Name',
-                'Final Desc': 'Description', 
-                'Final HTS': 'HTS Code', 
-                'Final FDA': 'FDA Code'
-            }, inplace=True)
-            
-            st.info("👇 Review Line Items")
-            edited_df = st.data_editor(
-                consolidated,
-                column_config={
-                    "Transfer Total": st.column_config.NumberColumn("Total $", format="$%.2f")
-                },
-                num_rows="dynamic"
-            )
-            total_val = edited_df['Transfer Total'].sum()
+                us_shipments = df[df['Ship to country'] == 'United States'].copy()
+                if 'Item type' in df.columns:
+                    us_shipments = us_shipments[us_shipments['Item type'] == 'product']
+                
+                # --- PREPARE DATA ---
+                # Check for Discount column
+                if 'Discount' not in us_shipments.columns:
+                    us_shipments['Discount'] = "0%"
 
-            # --- PREVIEW ---
-            st.subheader("🖨️ Document Preview & Download")
-            d_tab1, d_tab2, d_tab3 = st.tabs(["Commercial Invoice", "Purchase Order", "Sales Invoice"])
+                sales_data = us_shipments[['Variant code / SKU', 'Item variant', 'Quantity', 'Price per unit', 'Discount']].copy()
+                sales_data['Variant code / SKU'] = sales_data['Variant code / SKU'].astype(str)
+                
+                # --- MERGE WITH CATALOG ---
+                catalog = get_catalog()
+                if not catalog.empty:
+                    catalog['sku'] = catalog['sku'].astype(str)
+                    merged = pd.merge(sales_data, catalog, left_on='Variant code / SKU', right_on='sku', how='left')
+                    merged['Final Product Name'] = merged['product_name'].fillna(merged['Item variant'])
+                    merged['Final Desc'] = merged['description'].fillna(merged['product_name']).fillna(merged['Item variant'])
+                    merged['Final HTS'] = merged['hts_code'].fillna(DEFAULT_HTS)
+                    merged['Final FDA'] = merged['fda_code'].fillna(DEFAULT_FDA)
+                    processed = merged.copy()
+                else:
+                    processed = sales_data.copy()
+                    processed['Final Product Name'] = processed['Item variant']
+                    processed['Final Desc'] = processed['Item variant']
+                    processed['Final HTS'] = DEFAULT_HTS
+                    processed['Final FDA'] = DEFAULT_FDA
+                
+                # --- MATH: HANDLING EXISTING DISCOUNTS ---
+                # 1. Clean Discount Column (Remove % and convert to float)
+                processed['Discount_Float'] = processed['Discount'].astype(str).str.replace('%', '', regex=False)
+                processed['Discount_Float'] = pd.to_numeric(processed['Discount_Float'], errors='coerce').fillna(0) / 100.0
+                
+                # 2. Calculate Original Retail Price
+                # Formula: Current Price / (1 - Current Discount)
+                # Avoid division by zero: if discount is 100% (1.0), set retail to 0 (or keep current price)
+                processed['Original_Retail'] = processed.apply(
+                    lambda row: row['Price per unit'] / (1 - row['Discount_Float']) if row['Discount_Float'] < 1.0 else 0, axis=1
+                )
+                
+                # 3. Calculate New Transfer Price based on App Setting
+                app_discount_decimal = discount_rate / 100.0
+                processed['Transfer Price (Unit)'] = processed['Original_Retail'] * (1 - app_discount_decimal)
+                processed['Transfer Total'] = processed['Quantity'] * processed['Transfer Price (Unit)']
+                
+                # --- CONSOLIDATE ---
+                consolidated = processed.groupby(['Variant code / SKU', 'Final Product Name', 'Final Desc']).agg({
+                    'Quantity': 'sum',
+                    'Final HTS': 'first',
+                    'Final FDA': 'first',
+                    'Transfer Price (Unit)': 'mean',
+                    'Transfer Total': 'sum'
+                }).reset_index()
+                
+                # Rename for Display
+                consolidated.rename(columns={
+                    'Final Product Name': 'Product Name',
+                    'Final Desc': 'Description', 
+                    'Final HTS': 'HTS Code', 
+                    'Final FDA': 'FDA Code'
+                }, inplace=True)
+                
+                # --- EDITABLE TABLE ---
+                st.info("👇 Review Line Items")
+                edited_df = st.data_editor(
+                    consolidated,
+                    column_config={
+                        "Transfer Total": st.column_config.NumberColumn("Total $", format="$%.2f"),
+                        "Transfer Price (Unit)": st.column_config.NumberColumn("Transfer Price", format="$%.2f")
+                    },
+                    num_rows="dynamic"
+                )
+                total_val = edited_df['Transfer Total'].sum()
 
-            with d_tab1:
-                pdf_ci = generate_pdf("COMMERCIAL INVOICE", edited_df, inv_number, inv_date, 
-                                      shipper_txt, importer_txt, consignee_txt, notes_txt, total_val)
-                col_a, col_b = st.columns([1, 4])
-                with col_a:
-                    st.download_button("📥 PDF", pdf_ci, file_name=f"CI-{inv_number}.pdf", mime="application/pdf")
-                    if st.button("💾 Save", key="s_ci"): 
-                        save_invoice_to_db(inv_number, total_val, pdf_ci, importer_txt.split('\n')[0])
-                        st.success("Saved!")
-                b64_ci = base64.b64encode(pdf_ci).decode('utf-8')
-                st.markdown(f'<iframe src="data:application/pdf;base64,{b64_ci}" width="100%" height="600"></iframe>', unsafe_allow_html=True)
-            
-            with d_tab2:
-                pdf_po = generate_pdf("PURCHASE ORDER", edited_df, inv_number, inv_date, 
-                                      importer_txt, shipper_txt, consignee_txt, notes_txt, total_val)
-                st.download_button("📥 PDF", pdf_po, file_name=f"PO-{inv_number}.pdf", mime="application/pdf")
-                b64_po = base64.b64encode(pdf_po).decode('utf-8')
-                st.markdown(f'<iframe src="data:application/pdf;base64,{b64_po}" width="100%" height="600"></iframe>', unsafe_allow_html=True)
-            
-            with d_tab3:
-                pdf_si = generate_pdf("SALES INVOICE", edited_df, inv_number, inv_date, 
-                                      shipper_txt, importer_txt, consignee_txt, notes_txt, total_val)
-                st.download_button("📥 PDF", pdf_si, file_name=f"SI-{inv_number}.pdf", mime="application/pdf")
-                b64_si = base64.b64encode(pdf_si).decode('utf-8')
-                st.markdown(f'<iframe src="data:application/pdf;base64,{b64_si}" width="100%" height="600"></iframe>', unsafe_allow_html=True)
+                # --- PREVIEW TABS ---
+                st.subheader("🖨️ Document Preview & Download")
+                d_tab1, d_tab2, d_tab3 = st.tabs(["Commercial Invoice", "Purchase Order", "Sales Invoice"])
+
+                with d_tab1:
+                    pdf_ci = generate_pdf("COMMERCIAL INVOICE", edited_df, inv_number, inv_date, 
+                                          shipper_txt, importer_txt, consignee_txt, notes_txt, total_val)
+                    col_a, col_b = st.columns([1, 4])
+                    with col_a:
+                        st.download_button("📥 PDF", pdf_ci, file_name=f"CI-{inv_number}.pdf", mime="application/pdf")
+                        if st.button("💾 Save", key="s_ci"): 
+                            save_invoice_to_db(inv_number, total_val, pdf_ci, importer_txt.split('\n')[0])
+                            st.success("Saved!")
+                    b64_ci = base64.b64encode(pdf_ci).decode('utf-8')
+                    st.markdown(f'<iframe src="data:application/pdf;base64,{b64_ci}" width="100%" height="600"></iframe>', unsafe_allow_html=True)
+                
+                with d_tab2:
+                    pdf_po = generate_pdf("PURCHASE ORDER", edited_df, inv_number, inv_date, 
+                                          importer_txt, shipper_txt, consignee_txt, notes_txt, total_val)
+                    st.download_button("📥 PDF", pdf_po, file_name=f"PO-{inv_number}.pdf", mime="application/pdf")
+                    b64_po = base64.b64encode(pdf_po).decode('utf-8')
+                    st.markdown(f'<iframe src="data:application/pdf;base64,{b64_po}" width="100%" height="600"></iframe>', unsafe_allow_html=True)
+                
+                with d_tab3:
+                    pdf_si = generate_pdf("SALES INVOICE", edited_df, inv_number, inv_date, 
+                                          shipper_txt, importer_txt, consignee_txt, notes_txt, total_val)
+                    st.download_button("📥 PDF", pdf_si, file_name=f"SI-{inv_number}.pdf", mime="application/pdf")
+                    b64_si = base64.b64encode(pdf_si).decode('utf-8')
+                    st.markdown(f'<iframe src="data:application/pdf;base64,{b64_si}" width="100%" height="600"></iframe>', unsafe_allow_html=True)
 
         except Exception as e:
             st.error(f"Processing Error: {e}")
