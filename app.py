@@ -2,11 +2,12 @@ import streamlit as st
 import pandas as pd
 from fpdf import FPDF
 from datetime import date
+import base64
 
 # --- Configuration ---
 st.set_page_config(page_title="Holistic Roasters Export Tool", layout="centered")
 st.title("☕ Holistic Roasters Export Tool")
-st.markdown("Upload the daily Sales Order CSV to generate US Customs & Intercompany PDFs.")
+st.markdown("Upload the daily Sales Order CSV to generate, preview, and download US Customs PDFs.")
 
 # --- Sidebar ---
 st.sidebar.header("Configuration")
@@ -86,24 +87,28 @@ def create_pdf(dataframe, doc_title, sender_text, receiver_text, total_value):
     pdf.cell(165, 10, "Total (USD):", 0, 0, 'R')
     pdf.cell(25, 10, f"${total_value:.2f}", 0, 1, 'R')
     
-    # --- THE FIX IS HERE: Convert to bytes ---
     return bytes(pdf.output())
+
+# --- Helper to Show PDF in App ---
+def display_pdf(pdf_bytes):
+    # Convert bytes to base64 string for embedding
+    base64_pdf = base64.b64encode(pdf_bytes).decode('utf-8')
+    # Embed PDF in an HTML iframe
+    pdf_display = f'<iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="800" type="application/pdf"></iframe>'
+    st.markdown(pdf_display, unsafe_allow_html=True)
 
 # --- Logic ---
 def process_data(df, discount_pct):
-    # Filter US & Products
     us_shipments = df[df['Ship to country'] == 'United States'].copy()
     if 'Item type' in df.columns:
         us_shipments = us_shipments[us_shipments['Item type'] == 'product']
 
-    # Select & Calculate
     cols = ['Variant code / SKU', 'Item variant', 'Quantity', 'Price per unit']
     processed = us_shipments[cols].copy()
     
     processed['Transfer Price (Unit)'] = processed['Price per unit'] * (1 - discount_pct/100.0)
     processed['Transfer Total'] = processed['Quantity'] * processed['Transfer Price (Unit)']
     
-    # Consolidate
     consolidated = processed.groupby(['Variant code / SKU', 'Item variant']).agg({
         'Quantity': 'sum',
         'Transfer Price (Unit)': 'mean',
@@ -126,42 +131,30 @@ if uploaded_file:
             st.success("✅ Data Processed Successfully!")
             st.metric("Total Transfer Value", f"${total_val:,.2f}")
             
-            # Show Preview
-            with st.expander("See Invoice Data Preview"):
-                st.dataframe(invoice_data.style.format({"Transfer Price (Unit)": "${:.2f}", "Transfer Total": "${:.2f}"}))
-
             # Generate PDFs in memory
             pdf_po = create_pdf(invoice_data, "PURCHASE ORDER", ENTITY_US, SENDER_CA, total_val)
             pdf_ci = create_pdf(invoice_data, "COMMERCIAL INVOICE", SENDER_CA, ENTITY_US, total_val)
             pdf_si = create_pdf(invoice_data, "SALES INVOICE", SENDER_CA, ENTITY_US, total_val)
 
-            # --- Display Download Buttons (3 Separate Buttons) ---
-            st.subheader("Download Documents")
-            col1, col2, col3 = st.columns(3)
+            # --- TABS Interface for Preview & Download ---
+            st.subheader("Document Preview & Download")
             
-            with col1:
-                st.download_button(
-                    label="📄 Purchase Order",
-                    data=pdf_po,
-                    file_name=f"Purchase_Order_{date.today()}.pdf",
-                    mime="application/pdf"
-                )
-            
-            with col2:
-                st.download_button(
-                    label="📄 Commercial Invoice",
-                    data=pdf_ci,
-                    file_name=f"Commercial_Invoice_{date.today()}.pdf",
-                    mime="application/pdf"
-                )
+            tab1, tab2, tab3 = st.tabs(["📄 Purchase Order", "📄 Commercial Invoice", "📄 Sales Invoice"])
 
-            with col3:
-                st.download_button(
-                    label="📄 Sales Invoice",
-                    data=pdf_si,
-                    file_name=f"Sales_Invoice_{date.today()}.pdf",
-                    mime="application/pdf"
-                )
+            with tab1:
+                st.download_button("Download Purchase Order", pdf_po, file_name=f"Purchase_Order_{date.today()}.pdf", mime="application/pdf")
+                st.markdown("---")
+                display_pdf(pdf_po)
+
+            with tab2:
+                st.download_button("Download Commercial Invoice", pdf_ci, file_name=f"Commercial_Invoice_{date.today()}.pdf", mime="application/pdf")
+                st.markdown("---")
+                display_pdf(pdf_ci)
+
+            with tab3:
+                st.download_button("Download Sales Invoice", pdf_si, file_name=f"Sales_Invoice_{date.today()}.pdf", mime="application/pdf")
+                st.markdown("---")
+                display_pdf(pdf_si)
 
     except Exception as e:
         st.error(f"An error occurred: {e}")
