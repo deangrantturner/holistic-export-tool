@@ -44,7 +44,6 @@ def save_invoice_metadata(inv_num, total_val, buyer):
         conn = sqlite3.connect('invoices.db')
         c = conn.cursor()
         
-        # Check existing versions to auto-increment (e.g. INV-100-1)
         c.execute("SELECT invoice_number FROM invoice_history_v3 WHERE invoice_number LIKE ?", (inv_num + '%',))
         existing_nums = [row[0] for row in c.fetchall()]
         
@@ -102,17 +101,18 @@ def clear_catalog():
     conn.commit()
     conn.close()
 
-def save_signature(image_bytes):
+# --- Signature & Settings Functions ---
+def save_setting(key, value_bytes):
     conn = sqlite3.connect('invoices.db')
     c = conn.cursor()
-    c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('signature', ?)", (image_bytes,))
+    c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, value_bytes))
     conn.commit()
     conn.close()
 
-def get_signature():
+def get_setting(key):
     conn = sqlite3.connect('invoices.db')
     c = conn.cursor()
-    c.execute("SELECT value FROM settings WHERE key='signature'")
+    c.execute("SELECT value FROM settings WHERE key=?", (key,))
     data = c.fetchone()
     conn.close()
     return data[0] if data else None
@@ -145,7 +145,7 @@ init_db()
 # --- Page Config ---
 st.set_page_config(page_title="Holistic Roasters Export Hub", layout="wide")
 
-# --- CSS STYLING ---
+# --- CUSTOM BRANDING CSS ---
 st.markdown("""
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700&family=Open+Sans:wght@400;600&display=swap');
@@ -157,16 +157,15 @@ st.markdown("""
         }
 
         /* --- STICKY TABS FIX --- */
-        /* This targets the specific container for the tab buttons */
         div[data-testid="stTabs"] > div:first-child {
             position: sticky !important;
             top: 0px !important;
             z-index: 99999 !important;
-            background-color: #FAFAFA !important; /* Matches background */
+            background-color: #FAFAFA !important;
             padding-top: 15px;
             padding-bottom: 10px;
             border-bottom: 2px solid #E0E0E0;
-            box-shadow: 0px 4px 6px rgba(0,0,0,0.05); /* Subtle shadow to show separation */
+            box-shadow: 0px 4px 6px rgba(0,0,0,0.05);
         }
 
         /* Headers */
@@ -309,7 +308,7 @@ def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship,
     
     pdf.set_y(y_mid + 35)
 
-    # --- TABLE ---
+    # --- TABLE HEADERS ---
     w = [12, 40, 45, 23, 23, 22, 25]
     headers = ["QTY", "PRODUCT", "DESCRIPTION", "HTS #", "FDA CODE", "UNIT ($)", "TOTAL ($)"]
     
@@ -319,6 +318,7 @@ def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship,
         pdf.cell(w[i], 8, h, 1, 0, 'C', fill=True)
     pdf.ln()
     
+    # --- DYNAMIC TABLE ROWS ---
     pdf.set_font("Helvetica", '', 7)
     line_h = 5
 
@@ -425,8 +425,8 @@ with tab_generate:
         sig_col_a, sig_col_b = st.columns(2)
         with sig_col_a:
             signer_name = st.text_input("Signatory Name", value="Dean Turner")
-            saved_sig = get_signature()
-            if saved_sig:
+            saved_sig_bytes = get_signature() # renamed var to avoid conflict
+            if saved_sig_bytes:
                 st.success("✅ Signature on file")
                 if st.button("Clear Signature"):
                     conn = sqlite3.connect('invoices.db')
@@ -443,7 +443,8 @@ with tab_generate:
                 save_signature(bytes_data)
                 st.success("Saved!")
                 st.rerun()
-        final_sig_bytes = saved_sig if saved_sig else (sig_upload.getvalue() if sig_upload else None)
+        # Logic to choose which signature to use
+        final_sig_bytes = saved_sig_bytes if saved_sig_bytes else (sig_upload.getvalue() if sig_upload else None)
 
     st.subheader("Upload Orders")
     uploaded_file = st.file_uploader("Upload Daily Orders CSV", type=['csv'])
@@ -541,8 +542,24 @@ with tab_generate:
                     st.subheader("📧 Email Center")
                     with st.expander("⚙️ Sender Settings (Required)", expanded=False):
                         st.info("You need an 'App Password' for Gmail. Normal passwords won't work.")
-                        sender_email = st.text_input("Your Email", value="dean.turner@holisticroasters.com")
-                        sender_pass = st.text_input("App Password", type="password")
+                        
+                        # Load Saved Settings
+                        saved_email = get_signature() # NOT signature, need get_setting
+                        # We need to implement generic setting fetching properly
+                        # Retrieve raw values (bytes -> decode)
+                        db_email_bytes = get_setting('smtp_email')
+                        db_pass_bytes = get_setting('smtp_pass')
+                        
+                        default_email = db_email_bytes.decode('utf-8') if db_email_bytes else "dean.turner@holisticroasters.com"
+                        default_pass = db_pass_bytes.decode('utf-8') if db_pass_bytes else ""
+                        
+                        sender_email = st.text_input("Your Email", value=default_email)
+                        sender_pass = st.text_input("App Password", value=default_pass, type="password")
+                        
+                        if st.button("💾 Save Settings"):
+                            save_setting('smtp_email', sender_email.encode('utf-8'))
+                            save_setting('smtp_pass', sender_pass.encode('utf-8'))
+                            st.success("Credentials Saved!")
                     
                     recipient_email = st.text_input("Send To:", value="dean.turner@holisticroasters.com")
                     
