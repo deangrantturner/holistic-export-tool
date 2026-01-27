@@ -101,7 +101,7 @@ def clear_catalog():
     conn.commit()
     conn.close()
 
-# --- Signature & Settings Functions ---
+# --- Settings & Signature Functions (FIXED) ---
 def save_setting(key, value_bytes):
     conn = sqlite3.connect('invoices.db')
     c = conn.cursor()
@@ -116,6 +116,13 @@ def get_setting(key):
     data = c.fetchone()
     conn.close()
     return data[0] if data else None
+
+# Wrapper functions to maintain compatibility with existing calls
+def save_signature(image_bytes):
+    save_setting('signature', image_bytes)
+
+def get_signature():
+    return get_setting('signature')
 
 # --- Email Function ---
 def send_email_with_attachments(sender_email, sender_password, recipient_email, subject, body, files):
@@ -425,7 +432,7 @@ with tab_generate:
         sig_col_a, sig_col_b = st.columns(2)
         with sig_col_a:
             signer_name = st.text_input("Signatory Name", value="Dean Turner")
-            saved_sig_bytes = get_signature() # renamed var to avoid conflict
+            saved_sig_bytes = get_signature()
             if saved_sig_bytes:
                 st.success("✅ Signature on file")
                 if st.button("Clear Signature"):
@@ -443,7 +450,6 @@ with tab_generate:
                 save_signature(bytes_data)
                 st.success("Saved!")
                 st.rerun()
-        # Logic to choose which signature to use
         final_sig_bytes = saved_sig_bytes if saved_sig_bytes else (sig_upload.getvalue() if sig_upload else None)
 
     st.subheader("Upload Orders")
@@ -543,23 +549,22 @@ with tab_generate:
                     with st.expander("⚙️ Sender Settings (Required)", expanded=False):
                         st.info("You need an 'App Password' for Gmail. Normal passwords won't work.")
                         
-                        # Load Saved Settings
-                        saved_email = get_signature() # NOT signature, need get_setting
-                        # We need to implement generic setting fetching properly
-                        # Retrieve raw values (bytes -> decode)
-                        db_email_bytes = get_setting('smtp_email')
-                        db_pass_bytes = get_setting('smtp_pass')
+                        # Load Settings from DB
+                        db_email = get_setting('smtp_email')
+                        db_pass = get_setting('smtp_pass')
                         
-                        default_email = db_email_bytes.decode('utf-8') if db_email_bytes else "dean.turner@holisticroasters.com"
-                        default_pass = db_pass_bytes.decode('utf-8') if db_pass_bytes else ""
+                        # Decode if bytes
+                        default_email = db_email.decode('utf-8') if db_email else "dean.turner@holisticroasters.com"
+                        default_pass = db_pass.decode('utf-8') if db_pass else ""
                         
                         sender_email = st.text_input("Your Email", value=default_email)
                         sender_pass = st.text_input("App Password", value=default_pass, type="password")
                         
-                        if st.button("💾 Save Settings"):
+                        if st.button("💾 Save Credentials"):
                             save_setting('smtp_email', sender_email.encode('utf-8'))
                             save_setting('smtp_pass', sender_pass.encode('utf-8'))
                             st.success("Credentials Saved!")
+                            st.rerun()
                     
                     recipient_email = st.text_input("Send To:", value="dean.turner@holisticroasters.com")
                     
