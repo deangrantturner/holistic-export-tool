@@ -5,6 +5,7 @@ from fpdf import FPDF
 from datetime import date
 import base64
 import io
+import re
 
 # --- Database Setup (SQLite) ---
 def init_db():
@@ -198,8 +199,8 @@ def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship,
     pdf.set_y(y_mid + 35)
 
     # --- TABLE ---
-    # Widths updated: Removed Weight (20) -> Distributed to Desc/HTS/FDA
-    w = [15, 80, 25, 25, 22, 23] # Sum = 190
+    # Widths: Qty(15), Desc(80), HTS(25), FDA(25), Price(22), Total(23) = 190
+    w = [15, 80, 25, 25, 22, 23]
     headers = ["QTY", "DESCRIPTION", "HTS #", "FDA CODE", "UNIT ($)", "TOTAL ($)"]
     pdf.set_font("Helvetica", 'B', 8)
     pdf.set_fill_color(220, 220, 220)
@@ -211,7 +212,8 @@ def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship,
     
     for _, row in df.iterrows():
         qty = str(int(row['Quantity']))
-        desc = str(row['Final Desc'])[:60] # Longer desc allowed now
+        # FIX: The dataframe column is 'Item variant' after renaming, not 'Final Desc'
+        desc = str(row['Item variant'])[:60] 
         
         hts = str(row.get('HTS Code', '') or '')
         fda = str(row.get('FDA Code', '') or '')
@@ -298,6 +300,7 @@ with tab_generate:
                 'Transfer Total': 'sum'
             }).reset_index()
             
+            # RENAME FOR DISPLAY (This was causing the bug! Now the PDF generator knows this name)
             consolidated.rename(columns={
                 'Final Desc': 'Item variant', 
                 'Final HTS': 'HTS Code', 
