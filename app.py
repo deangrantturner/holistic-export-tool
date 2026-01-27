@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import sqlite3
 from fpdf import FPDF
-from datetime import datetime, date
+from datetime import date, datetime
 import io
 import re
 import tempfile
@@ -41,8 +41,7 @@ def save_invoice_to_db(inv_num, total_val, buyer, pdf_ci, pdf_po, pdf_si):
         conn = sqlite3.connect('invoices.db')
         c = conn.cursor()
         
-        # CHANGED: Always INSERT a new record with a precise timestamp. 
-        # We no longer check for existence or update old records.
+        # Always INSERT a new record with a precise timestamp
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
         
         c.execute("""INSERT INTO invoice_history_v2 
@@ -56,7 +55,6 @@ def save_invoice_to_db(inv_num, total_val, buyer, pdf_ci, pdf_po, pdf_si):
 
 def get_history():
     conn = sqlite3.connect('invoices.db')
-    # We fetch the ID now so we can select specific versions later
     df = pd.read_sql_query("SELECT id, invoice_number, date_created, buyer_name, total_value FROM invoice_history_v2 ORDER BY id DESC", conn)
     conn.close()
     return df
@@ -64,7 +62,6 @@ def get_history():
 def get_documents_by_id(record_id):
     conn = sqlite3.connect('invoices.db')
     c = conn.cursor()
-    # Fetch by unique Row ID, not Invoice Number (since Invoice Number can now be duplicated)
     c.execute("SELECT pdf_ci, pdf_po, pdf_si FROM invoice_history_v2 WHERE id=?", (record_id,))
     data = c.fetchone()
     conn.close()
@@ -316,46 +313,47 @@ with tab_generate:
             inv_date = st.date_input("Date", value=date.today())
             discount_rate = st.number_input("Target Transfer Discount %", min_value=0.0, max_value=100.0, value=50.0, step=0.1, format="%.1f")
             
-            # --- SIGNATURE SECTION (Side-by-Side) ---
-            st.markdown("---")
-            st.markdown("#### Signature Settings")
-            
-            sig_col_a, sig_col_b = st.columns(2)
-            
-            with sig_col_a:
-                # Name Input
-                signer_name = st.text_input("Signatory Name", value="Dean Turner")
-                
-                # Check status
-                saved_sig = get_signature()
-                if saved_sig:
-                    st.success("✅ Signature on file")
-                    if st.button("Clear Signature"):
-                        conn = sqlite3.connect('invoices.db')
-                        conn.execute("DELETE FROM settings WHERE key='signature'")
-                        conn.commit()
-                        conn.close()
-                        st.rerun()
-                else:
-                    st.warning("⚠️ No signature")
-            
-            with sig_col_b:
-                # Upload Button
-                sig_upload = st.file_uploader("Upload New (PNG/JPG)", type=['png', 'jpg', 'jpeg'], key="sig_upl")
-                if sig_upload:
-                    bytes_data = sig_upload.getvalue()
-                    save_signature(bytes_data)
-                    st.success("Saved!")
-                    st.rerun()
-
-            final_sig_bytes = saved_sig if saved_sig else (sig_upload.getvalue() if sig_upload else None)
-            
         with c2:
             shipper_txt = st.text_area("Shipper / Exporter", value=DEFAULT_SHIPPER, height=120)
             importer_txt = st.text_area("Importer (Bill To)", value=DEFAULT_IMPORTER, height=100)
         with c3:
             consignee_txt = st.text_area("Consignee (Ship To)", value=DEFAULT_CONSIGNEE, height=120)
             notes_txt = st.text_area("Notes / Broker", value=DEFAULT_NOTES, height=100)
+
+        # --- SIGNATURE SECTION (Now Full Width at Bottom) ---
+        st.markdown("---")
+        st.markdown("#### Signature Settings")
+        
+        # New Layout: Split into 2 equal columns spanning the full width
+        sig_col_a, sig_col_b = st.columns(2)
+        
+        with sig_col_a:
+            # Name Input
+            signer_name = st.text_input("Signatory Name", value="Dean Turner")
+            
+            # Check status
+            saved_sig = get_signature()
+            if saved_sig:
+                st.success("✅ Signature on file")
+                if st.button("Clear Signature"): # Removed size="small" to fix error
+                    conn = sqlite3.connect('invoices.db')
+                    conn.execute("DELETE FROM settings WHERE key='signature'")
+                    conn.commit()
+                    conn.close()
+                    st.rerun()
+            else:
+                st.warning("⚠️ No signature")
+        
+        with sig_col_b:
+            # Upload Button
+            sig_upload = st.file_uploader("Upload New (PNG/JPG)", type=['png', 'jpg', 'jpeg'], key="sig_upl")
+            if sig_upload:
+                bytes_data = sig_upload.getvalue()
+                save_signature(bytes_data)
+                st.success("Saved!")
+                st.rerun()
+
+        final_sig_bytes = saved_sig if saved_sig else (sig_upload.getvalue() if sig_upload else None)
 
     st.subheader("Upload Orders")
     uploaded_file = st.file_uploader("Upload Daily Orders CSV", type=['csv'])
