@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import sqlite3
 from fpdf import FPDF
-from datetime import datetime, date  # FIXED: Added 'date' back
+from datetime import datetime, date
 import io
 import re
 import tempfile
@@ -37,12 +37,21 @@ def init_db():
     conn.close()
 
 # --- DB Functions ---
-def save_invoice_callback(base_inv_num, total_val, buyer, pdf_ci, pdf_po, pdf_si):
+def save_invoice_callback(base_inv_num, total_val, buyer):
     """
-    Callback function to save invoice only when download button is clicked.
-    Handles versioning (INV-001, INV-001-1, INV-001-2...)
+    Callback to save invoice. Retreives PDFs directly from Session State
+    to ensure data integrity.
     """
     try:
+        # Retrieve binary data from session state
+        pdf_ci = st.session_state.get('current_pdf_ci')
+        pdf_po = st.session_state.get('current_pdf_po')
+        pdf_si = st.session_state.get('current_pdf_si')
+
+        if not pdf_ci or not pdf_po or not pdf_si:
+            st.error("⚠️ Save Failed: PDF data was missing from session.")
+            return
+
         conn = sqlite3.connect('invoices.db')
         c = conn.cursor()
         
@@ -57,7 +66,6 @@ def save_invoice_callback(base_inv_num, total_val, buyer, pdf_ci, pdf_po, pdf_si
             elif num.startswith(base_inv_num + "-"):
                 count += 1
         
-        # Append digit for new versions
         if count == 0:
             new_version_num = base_inv_num 
         else:
@@ -67,17 +75,20 @@ def save_invoice_callback(base_inv_num, total_val, buyer, pdf_ci, pdf_po, pdf_si
         est = pytz.timezone('US/Eastern')
         timestamp = datetime.now(est).strftime("%Y-%m-%d %H:%M EST")
         
-        # 3. Insert
+        # 3. Insert using sqlite3.Binary to ensure BLOB storage
         c.execute("""INSERT INTO invoice_history_v2 
                      (invoice_number, date_created, total_value, buyer_name, pdf_ci, pdf_po, pdf_si) 
                      VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                  (new_version_num, timestamp, total_val, buyer, pdf_ci, pdf_po, pdf_si))
+                  (new_version_num, timestamp, total_val, buyer, 
+                   sqlite3.Binary(pdf_ci), 
+                   sqlite3.Binary(pdf_po), 
+                   sqlite3.Binary(pdf_si)))
         conn.commit()
         conn.close()
         st.toast(f"✅ Archived as {new_version_num}")
         
     except Exception as e:
-        st.error(f"Save failed: {e}")
+        st.error(f"Database Error: {e}")
 
 def get_history():
     conn = sqlite3.connect('invoices.db')
@@ -121,7 +132,6 @@ def clear_catalog():
     conn.commit()
     conn.close()
 
-# --- Signature Functions ---
 def save_signature(image_bytes):
     conn = sqlite3.connect('invoices.db')
     c = conn.cursor()
@@ -446,7 +456,8 @@ with tab_generate:
                 )
                 total_val = edited_df['Transfer Total'].sum()
                 
-                # --- GENERATE PDFS ---
+                # --- GENERATE PDFS & SAVE TO SESSION STATE ---
+                # We store them in session state so the callback can access the exact binary data
                 pdf_ci = generate_pdf("COMMERCIAL INVOICE", edited_df, inv_number, inv_date, 
                                       shipper_txt, importer_txt, consignee_txt, notes_txt, total_val, final_sig_bytes, signer_name)
                 pdf_po = generate_pdf("PURCHASE ORDER", edited_df, inv_number, inv_date, 
@@ -454,24 +465,28 @@ with tab_generate:
                 pdf_si = generate_pdf("SALES INVOICE", edited_df, inv_number, inv_date, 
                                       shipper_txt, importer_txt, consignee_txt, notes_txt, total_val, final_sig_bytes, signer_name)
                 
-                # --- DOWNLOAD BUTTONS (Auto-Save on Click) ---
+                st.session_state['current_pdf_ci'] = pdf_ci
+                st.session_state['current_pdf_po'] = pdf_po
+                st.session_state['current_pdf_si'] = pdf_si
+                
+                # --- DOWNLOAD BUTTONS ---
                 st.subheader("🖨️ Download Documents")
                 st.caption("✅ Documents are automatically archived when you download.")
                 
                 col_d1, col_d2, col_d3 = st.columns(3)
                 
-                # Pass data to callback
-                save_args = (inv_number, total_val, importer_txt.split('\n')[0], pdf_ci, pdf_po, pdf_si)
+                # Arguments for the callback
+                cb_args = (inv_number, total_val, importer_txt.split('\n')[0])
                 
                 with col_d1:
-                    st.download_button("📄 Commercial Invoice", pdf_ci, f"CI-{inv_number}.pdf", "application/pdf", 
-                                       on_click=save_invoice_callback, args=save_args)
+                    st.download_button("📄 Download Commercial Invoice", pdf_ci, f"CI-{inv_number}.pdf", "application/pdf", 
+                                       on_click=save_invoice_callback, args=cb_args)
                 with col_d2:
-                    st.download_button("📄 Purchase Order", pdf_po, f"PO-{inv_number}.pdf", "application/pdf", 
-                                       on_click=save_invoice_callback, args=save_args)
+                    st.download_button("📄 Download Purchase Order", pdf_po, f"PO-{inv_number}.pdf", "application/pdf", 
+                                       on_click=save_invoice_callback, args=cb_args)
                 with col_d3:
-                    st.download_button("📄 Sales Invoice", pdf_si, f"SI-{inv_number}.pdf", "application/pdf", 
-                                       on_click=save_invoice_callback, args=save_args)
+                    st.download_button("📄 Download Sales Invoice", pdf_si, f"SI-{inv_number}.pdf", "application/pdf", 
+                                       on_click=save_invoice_callback, args=cb_args)
 
         except Exception as e:
             st.error(f"Processing Error: {e}")
@@ -507,10 +522,12 @@ with tab_catalog:
 
     st.subheader("Edit Catalog")
     if not current_catalog.empty:
-        edited_catalog = st.data_editor(current_catalog, num_rows="dynamic")
+        edited_catalog = st.data_editor(current_catalog, num_rows="dynamic", key="cat_editor")
         if st.button("💾 Save Changes"):
             upsert_catalog_from_df(edited_catalog)
-            st.success("Saved!")
+            st.success("Changes saved!")
+    else:
+        st.info("Catalog is empty. Upload a CSV or add rows manually if enabled.")
 
 # ================= TAB 3: HISTORY =================
 with tab_history:
