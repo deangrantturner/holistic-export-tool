@@ -12,13 +12,17 @@ import os
 def init_db():
     conn = sqlite3.connect('invoices.db')
     c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS invoice_history
+    
+    # NEW HISTORY TABLE (V2) - Stores all 3 documents
+    c.execute('''CREATE TABLE IF NOT EXISTS invoice_history_v2
                  (id INTEGER PRIMARY KEY AUTOINCREMENT,
                   invoice_number TEXT,
                   date_created TEXT,
                   total_value REAL,
-                  pdf_data BLOB,
-                  buyer_name TEXT)''')
+                  buyer_name TEXT,
+                  pdf_ci BLOB,
+                  pdf_po BLOB,
+                  pdf_si BLOB)''')
     
     c.execute('''CREATE TABLE IF NOT EXISTS product_catalog_v3
                  (sku TEXT PRIMARY KEY,
@@ -30,27 +34,42 @@ def init_db():
     conn.close()
 
 # --- DB Functions ---
-def save_invoice_to_db(inv_num, total_val, pdf_bytes, buyer):
+def save_invoice_to_db(inv_num, total_val, buyer, pdf_ci, pdf_po, pdf_si):
     conn = sqlite3.connect('invoices.db')
     c = conn.cursor()
-    c.execute("INSERT INTO invoice_history (invoice_number, date_created, total_value, pdf_data, buyer_name) VALUES (?, ?, ?, ?, ?)",
-              (inv_num, date.today(), total_val, pdf_bytes, buyer))
+    # Check if invoice exists to avoid duplicates
+    c.execute("SELECT id FROM invoice_history_v2 WHERE invoice_number=?", (inv_num,))
+    exists = c.fetchone()
+    
+    if exists:
+        # Update existing
+        c.execute("""UPDATE invoice_history_v2 
+                     SET total_value=?, buyer_name=?, pdf_ci=?, pdf_po=?, pdf_si=?
+                     WHERE invoice_number=?""",
+                  (total_val, buyer, pdf_ci, pdf_po, pdf_si, inv_num))
+    else:
+        # Insert new
+        c.execute("""INSERT INTO invoice_history_v2 
+                     (invoice_number, date_created, total_value, buyer_name, pdf_ci, pdf_po, pdf_si) 
+                     VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                  (inv_num, date.today(), total_val, buyer, pdf_ci, pdf_po, pdf_si))
+    
     conn.commit()
     conn.close()
 
 def get_history():
     conn = sqlite3.connect('invoices.db')
-    df = pd.read_sql_query("SELECT invoice_number, date_created, buyer_name, total_value FROM invoice_history ORDER BY id DESC", conn)
+    df = pd.read_sql_query("SELECT invoice_number, date_created, buyer_name, total_value FROM invoice_history_v2 ORDER BY id DESC", conn)
     conn.close()
     return df
 
-def get_pdf_from_db(invoice_number):
+def get_documents_from_db(invoice_number):
     conn = sqlite3.connect('invoices.db')
     c = conn.cursor()
-    c.execute("SELECT pdf_data FROM invoice_history WHERE invoice_number=?", (invoice_number,))
+    c.execute("SELECT pdf_ci, pdf_po, pdf_si FROM invoice_history_v2 WHERE invoice_number=?", (invoice_number,))
     data = c.fetchone()
     conn.close()
-    return data[0] if data else None
+    return data if data else (None, None, None)
 
 def get_catalog():
     conn = sqlite3.connect('invoices.db')
@@ -118,13 +137,11 @@ class ProInvoice(FPDF):
     def header(self):
         pass
     def footer(self):
-        # REMOVED FOOTER ENTIRELY AS REQUESTED
         pass
 
 def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes, total_val, signature_file=None):
     pdf = ProInvoice()
     pdf.add_page()
-    # Margin set to 20mm to allow content to flow naturally without footer collision
     pdf.set_auto_page_break(auto=True, margin=20)
     
     # --- TITLE ---
@@ -136,71 +153,62 @@ def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship,
     pdf.set_font("Helvetica", '', 9)
     y_start = pdf.get_y()
     
-    # --- COLUMN 1: LEFT ---
+    # Column 1
     pdf.set_xy(10, y_start)
     pdf.set_font("Helvetica", 'B', 10)
     lbl_from = "SHIPPER / EXPORTER:" if "COMMERCIAL" in doc_type else "FROM (SELLER):"
     if "PURCHASE" in doc_type: lbl_from = "FROM (BUYER):"
-    
     pdf.cell(70, 5, lbl_from, 0, 1)
     pdf.set_x(10) 
     pdf.set_font("Helvetica", '', 9)
     pdf.multi_cell(70, 4, addr_from)
     y_end_1 = pdf.get_y()
 
-    # --- COLUMN 2: CENTER ---
+    # Column 2
     pdf.set_xy(90, y_start) 
     pdf.set_font("Helvetica", 'B', 10)
     lbl_to = "CONSIGNEE (SHIP TO):" if "COMMERCIAL" in doc_type else "SHIP TO:"
-    
     pdf.cell(70, 5, lbl_to, 0, 1)
     pdf.set_xy(90, pdf.get_y()) 
     pdf.set_font("Helvetica", '', 9)
     pdf.multi_cell(70, 4, addr_ship)
     y_end_2 = pdf.get_y()
 
-    # --- COLUMN 3: RIGHT ---
+    # Column 3
     x_right = 160
     pdf.set_xy(x_right, y_start)
     pdf.set_font("Helvetica", 'B', 12)
     pdf.cell(40, 6, f"Ref #: {inv_num}", 0, 1, 'R')
-    
     pdf.set_x(x_right)
     pdf.set_font("Helvetica", '', 10)
     pdf.cell(40, 6, f"Date: {inv_date}", 0, 1, 'R')
-    
     pdf.set_x(x_right)
     pdf.cell(40, 6, "Currency: USD", 0, 1, 'R')
-    
     if "COMMERCIAL" in doc_type:
         pdf.set_x(x_right)
         pdf.cell(40, 6, "Origin: CANADA", 0, 1, 'R')
-    
     y_end_3 = pdf.get_y()
 
-    # --- ROW 2: BILL TO / NOTES ---
+    # Row 2
     y_mid = max(y_end_1, y_end_2, y_end_3) + 10
     
-    # Left: Bill To
+    # Bill To
     pdf.set_xy(10, y_mid)
     pdf.set_font("Helvetica", 'B', 10)
     lbl_bill = "IMPORTER OF RECORD:" if "COMMERCIAL" in doc_type else "BILL TO:"
     if "PURCHASE" in doc_type: lbl_bill = "TO (VENDOR):"
-    
     pdf.cell(80, 5, lbl_bill, 0, 1)
     pdf.set_x(10)
     pdf.set_font("Helvetica", '', 9)
     pdf.multi_cell(80, 4, addr_to)
     
-    # Right: Notes Box
+    # Notes
     pdf.set_xy(100, y_mid)
     pdf.set_fill_color(245, 245, 245)
     pdf.rect(100, y_mid, 95, 30, 'F')
-    
     pdf.set_xy(102, y_mid + 2)
     pdf.set_font("Helvetica", 'B', 9)
     pdf.cell(50, 5, "NOTES / BROKER / FDA:", 0, 1)
-    
     pdf.set_xy(102, pdf.get_y())
     pdf.set_font("Helvetica", '', 8)
     pdf.multi_cell(90, 4, notes)
@@ -245,33 +253,24 @@ def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship,
     
     # --- SIGNATURE BLOCK ---
     pdf.ln(10)
-    # Check if we need to start a new page for signature to avoid split
-    if pdf.get_y() > 250:
-        pdf.add_page()
+    if pdf.get_y() > 250: pdf.add_page()
     
     pdf.set_font("Helvetica", '', 10)
     pdf.cell(0, 5, "I declare that all information contained in this invoice to be true and correct.", 0, 1, 'L')
     pdf.ln(5)
     
-    # IMAGE
     if signature_file:
-        # Save uploaded file to temp path for FPDF
         with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp:
             tmp.write(signature_file.getvalue())
             tmp_path = tmp.name
-        
-        # Place image (Width 40mm)
         try:
             pdf.image(tmp_path, w=40)
         except:
-            pdf.cell(0, 5, "[Error rendering signature image]", 0, 1)
-        
-        # Cleanup temp file
+            pdf.cell(0, 5, "[Error rendering signature]", 0, 1)
         os.unlink(tmp_path)
     else:
-        pdf.ln(15) # Space if no image
+        pdf.ln(15)
     
-    # Name
     pdf.ln(2)
     pdf.set_font("Helvetica", 'B', 10)
     pdf.cell(0, 5, "Dean Turner", 0, 1, 'L')
@@ -280,7 +279,6 @@ def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship,
 
 # ================= TAB 1: GENERATE DOCUMENTS =================
 with tab_generate:
-    # --- CONFIGURATION EXPANDER ---
     with st.expander("📝 Invoice Details & Addresses", expanded=True):
         c1, c2, c3 = st.columns(3)
         with c1:
@@ -288,7 +286,6 @@ with tab_generate:
             inv_date = st.date_input("Date", value=date.today())
             discount_rate = st.number_input("Target Transfer Discount %", min_value=0.0, max_value=100.0, value=50.0, step=0.1, format="%.1f")
             
-            # --- SIGNATURE UPLOAD ---
             st.markdown("---")
             st.markdown("**Signature**")
             sig_file = st.file_uploader("Upload Signature (PNG/JPG)", type=['png', 'jpg', 'jpeg'], key="sig_upl")
@@ -378,28 +375,29 @@ with tab_generate:
                 )
                 total_val = edited_df['Transfer Total'].sum()
 
-                # --- DOWNLOADS ---
-                st.subheader("🖨️ Download Documents")
-                col_d1, col_d2, col_d3 = st.columns(3)
+                # --- GENERATE ALL 3 DOCS ---
+                pdf_ci = generate_pdf("COMMERCIAL INVOICE", edited_df, inv_number, inv_date, 
+                                      shipper_txt, importer_txt, consignee_txt, notes_txt, total_val, sig_file)
+                pdf_po = generate_pdf("PURCHASE ORDER", edited_df, inv_number, inv_date, 
+                                      importer_txt, shipper_txt, consignee_txt, notes_txt, total_val, sig_file)
+                pdf_si = generate_pdf("SALES INVOICE", edited_df, inv_number, inv_date, 
+                                      shipper_txt, importer_txt, consignee_txt, notes_txt, total_val, sig_file)
 
-                with col_d1:
-                    # Pass sig_file to PDF generator
-                    pdf_ci = generate_pdf("COMMERCIAL INVOICE", edited_df, inv_number, inv_date, 
-                                          shipper_txt, importer_txt, consignee_txt, notes_txt, total_val, sig_file)
-                    st.download_button("📄 Commercial Invoice", pdf_ci, file_name=f"CI-{inv_number}.pdf", mime="application/pdf")
-                    if st.button("💾 Save to History", key="save_ci"):
-                        save_invoice_to_db(inv_number, total_val, pdf_ci, importer_txt.split('\n')[0])
-                        st.success("Saved!")
-
-                with col_d2:
-                    pdf_po = generate_pdf("PURCHASE ORDER", edited_df, inv_number, inv_date, 
-                                          importer_txt, shipper_txt, consignee_txt, notes_txt, total_val, sig_file)
-                    st.download_button("📄 Purchase Order", pdf_po, file_name=f"PO-{inv_number}.pdf", mime="application/pdf")
-
-                with col_d3:
-                    pdf_si = generate_pdf("SALES INVOICE", edited_df, inv_number, inv_date, 
-                                          shipper_txt, importer_txt, consignee_txt, notes_txt, total_val, sig_file)
-                    st.download_button("📄 Sales Invoice", pdf_si, file_name=f"SI-{inv_number}.pdf", mime="application/pdf")
+                # --- ACTIONS ---
+                st.subheader("🖨️ Actions")
+                c1, c2, c3, c4 = st.columns(4)
+                
+                with c1:
+                    if st.button("💾 Save All to History", type="primary"):
+                        save_invoice_to_db(inv_number, total_val, importer_txt.split('\n')[0], pdf_ci, pdf_po, pdf_si)
+                        st.success("Saved CI, PO, and SI to History!")
+                
+                with c2:
+                    st.download_button("📄 Download CI", pdf_ci, file_name=f"CI-{inv_number}.pdf", mime="application/pdf")
+                with c3:
+                    st.download_button("📄 Download PO", pdf_po, file_name=f"PO-{inv_number}.pdf", mime="application/pdf")
+                with c4:
+                    st.download_button("📄 Download SI", pdf_si, file_name=f"SI-{inv_number}.pdf", mime="application/pdf")
 
         except Exception as e:
             st.error(f"Processing Error: {e}")
@@ -410,18 +408,15 @@ with tab_catalog:
     st.markdown("Auto-fill details by SKU.")
     
     col_tools1, col_tools2, col_tools3 = st.columns(3)
-    
     with col_tools1:
         template_df = pd.DataFrame(columns=['sku', 'product_name', 'description', 'hts_code', 'fda_code'])
         csv_template = template_df.to_csv(index=False).encode('utf-8')
         st.download_button("📥 Download Empty Template", csv_template, "catalog_template.csv", "text/csv")
-    
     with col_tools2:
         current_catalog = get_catalog()
         if not current_catalog.empty:
             csv_current = current_catalog.to_csv(index=False).encode('utf-8')
             st.download_button("📥 Download Current Catalog", csv_current, "full_catalog.csv", "text/csv")
-    
     with col_tools3:
         if st.button("⚠️ Clear Entire Catalog"):
             clear_catalog()
@@ -458,8 +453,22 @@ with tab_history:
     st.dataframe(history_df, use_container_width=True)
     inv_list = history_df['invoice_number'].unique()
     if len(inv_list) > 0:
-        sel_inv = st.selectbox("Select Invoice:", inv_list)
-        if st.button("Fetch PDF"):
-            pdf_data = get_pdf_from_db(sel_inv)
-            if pdf_data:
-                st.download_button("Download", pdf_data, file_name=f"{sel_inv}.pdf", mime="application/pdf")
+        sel_inv = st.selectbox("Select Invoice to Download:", inv_list)
+        if st.button("Fetch Documents"):
+            ci, po, si = get_documents_from_db(sel_inv)
+            
+            c_h1, c_h2, c_h3 = st.columns(3)
+            if ci:
+                with c_h1: st.download_button(f"📄 Download CI-{sel_inv}", ci, f"CI-{sel_inv}.pdf", "application/pdf")
+            else:
+                with c_h1: st.warning("CI not found")
+            
+            if po:
+                with c_h2: st.download_button(f"📄 Download PO-{sel_inv}", po, f"PO-{sel_inv}.pdf", "application/pdf")
+            else:
+                with c_h2: st.warning("PO not found")
+                
+            if si:
+                with c_h3: st.download_button(f"📄 Download SI-{sel_inv}", si, f"SI-{sel_inv}.pdf", "application/pdf")
+            else:
+                with c_h3: st.warning("SI not found")
