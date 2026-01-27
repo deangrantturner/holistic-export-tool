@@ -44,6 +44,7 @@ def save_invoice_metadata(inv_num, total_val, buyer):
         conn = sqlite3.connect('invoices.db')
         c = conn.cursor()
         
+        # Check existing versions to auto-increment (e.g. INV-100-1)
         c.execute("SELECT invoice_number FROM invoice_history_v3 WHERE invoice_number LIKE ?", (inv_num + '%',))
         existing_nums = [row[0] for row in c.fetchall()]
         
@@ -144,75 +145,58 @@ init_db()
 # --- Page Config ---
 st.set_page_config(page_title="Holistic Roasters Export Hub", layout="wide")
 
-# --- CUSTOM BRANDING CSS ---
+# --- CSS STYLING ---
 st.markdown("""
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700&family=Open+Sans:wght@400;600&display=swap');
 
         /* Main App Background */
         .stApp {
-            background-color: #FAFAFA; /* Soft Off-White */
+            background-color: #FAFAFA;
             font-family: 'Open Sans', sans-serif;
         }
 
-        /* Sticky Tabs Header - UPDATED FIXED VERSION */
-        /* Targets only the tab buttons container, not the whole block */
+        /* --- STICKY TABS FIX --- */
+        /* This targets the specific container for the tab buttons */
         div[data-testid="stTabs"] > div:first-child {
-            position: sticky;
-            top: 0;
-            background-color: #FAFAFA;
-            z-index: 9999;
-            padding-top: 10px;
+            position: sticky !important;
+            top: 0px !important;
+            z-index: 99999 !important;
+            background-color: #FAFAFA !important; /* Matches background */
+            padding-top: 15px;
             padding-bottom: 10px;
             border-bottom: 2px solid #E0E0E0;
+            box-shadow: 0px 4px 6px rgba(0,0,0,0.05); /* Subtle shadow to show separation */
         }
 
         /* Headers */
         h1, h2, h3 {
             font-family: 'Montserrat', sans-serif !important;
-            color: #6F4E37 !important; /* Coffee Brown */
+            color: #6F4E37 !important;
             font-weight: 700;
         }
 
-        /* Buttons (Primary - Coffee Brown) */
+        /* Buttons (Primary) */
         div.stButton > button {
             background-color: #6F4E37 !important;
             color: white !important;
             border-radius: 8px !important;
             border: none !important;
-            padding: 0.5rem 1rem !important;
             font-family: 'Montserrat', sans-serif !important;
             font-weight: 600 !important;
-            transition: all 0.2s ease;
         }
         div.stButton > button:hover {
-            background-color: #5A3E2B !important; /* Darker Brown Hover */
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            background-color: #5A3E2B !important;
         }
 
-        /* Secondary/Ghost Buttons */
-        div.stButton > button[kind="secondary"] {
-            background-color: transparent !important;
-            border: 2px solid #6F4E37 !important;
-            color: #6F4E37 !important;
-        }
-
-        /* Inputs & Text Areas */
+        /* Inputs */
         .stTextInput input, .stTextArea textarea, .stDateInput input, .stNumberInput input {
             border-radius: 8px !important;
             border: 1px solid #D0D0D0 !important;
-            background-color: white !important;
         }
         .stTextInput input:focus, .stTextArea textarea:focus {
             border-color: #6F4E37 !important;
             box-shadow: 0 0 0 1px #6F4E37 !important;
-        }
-
-        /* Tables */
-        div[data-testid="stDataFrame"] {
-            border: 1px solid #E0E0E0;
-            border-radius: 8px;
-            overflow: hidden;
         }
     </style>
 """, unsafe_allow_html=True)
@@ -325,7 +309,7 @@ def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship,
     
     pdf.set_y(y_mid + 35)
 
-    # --- TABLE HEADERS ---
+    # --- TABLE ---
     w = [12, 40, 45, 23, 23, 22, 25]
     headers = ["QTY", "PRODUCT", "DESCRIPTION", "HTS #", "FDA CODE", "UNIT ($)", "TOTAL ($)"]
     
@@ -335,7 +319,6 @@ def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship,
         pdf.cell(w[i], 8, h, 1, 0, 'C', fill=True)
     pdf.ln()
     
-    # --- DYNAMIC TABLE ROWS ---
     pdf.set_font("Helvetica", '', 7)
     line_h = 5
 
