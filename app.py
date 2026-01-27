@@ -4,7 +4,6 @@ import sqlite3
 from fpdf import FPDF
 from datetime import date
 import base64
-import re
 import io
 
 # --- Database Setup (SQLite) ---
@@ -20,14 +19,13 @@ def init_db():
                   pdf_data BLOB,
                   buyer_name TEXT)''')
     
-    # Catalog Table V2 (Updated schema with Product Name)
-    c.execute('''CREATE TABLE IF NOT EXISTS product_catalog_v2
+    # Catalog Table V3 (Removed Weight)
+    c.execute('''CREATE TABLE IF NOT EXISTS product_catalog_v3
                  (sku TEXT PRIMARY KEY,
                   product_name TEXT,
                   description TEXT,
                   hts_code TEXT,
-                  fda_code TEXT,
-                  net_weight_kg REAL)''')
+                  fda_code TEXT)''')
     conn.commit()
     conn.close()
 
@@ -57,7 +55,7 @@ def get_pdf_from_db(invoice_number):
 # --- DB: Catalog Functions ---
 def get_catalog():
     conn = sqlite3.connect('invoices.db')
-    df = pd.read_sql_query("SELECT * FROM product_catalog_v2", conn)
+    df = pd.read_sql_query("SELECT * FROM product_catalog_v3", conn)
     conn.close()
     return df
 
@@ -65,37 +63,26 @@ def upsert_catalog_from_df(df):
     conn = sqlite3.connect('invoices.db')
     c = conn.cursor()
     for _, row in df.iterrows():
-        # Clean data
         p_name = row.get('product_name', '')
         desc = row.get('description', '')
-        # Fallback: if description is empty, use product name
         if pd.isna(desc) or desc == "":
             desc = p_name
             
-        c.execute("""INSERT OR REPLACE INTO product_catalog_v2 
-                     (sku, product_name, description, hts_code, fda_code, net_weight_kg) 
-                     VALUES (?, ?, ?, ?, ?, ?)""",
-                  (str(row['sku']), p_name, desc, str(row['hts_code']), str(row['fda_code']), row['net_weight_kg']))
+        c.execute("""INSERT OR REPLACE INTO product_catalog_v3 
+                     (sku, product_name, description, hts_code, fda_code) 
+                     VALUES (?, ?, ?, ?, ?)""",
+                  (str(row['sku']), p_name, desc, str(row['hts_code']), str(row['fda_code'])))
     conn.commit()
     conn.close()
 
 def clear_catalog():
     conn = sqlite3.connect('invoices.db')
     c = conn.cursor()
-    c.execute("DELETE FROM product_catalog_v2")
+    c.execute("DELETE FROM product_catalog_v3")
     conn.commit()
     conn.close()
 
 init_db()
-
-# --- HELPER: Weight Estimation ---
-def estimate_weight_kg(variant_name):
-    variant_name = str(variant_name).lower()
-    grams = re.search(r'(\d+)\s*g', variant_name)
-    if grams: return float(grams.group(1)) / 1000.0
-    kgs = re.search(r'(\d+(?:\.\d+)?)\s*kg', variant_name)
-    if kgs: return float(kgs.group(1))
-    return 0.0
 
 # --- Page Config ---
 st.set_page_config(page_title="Holistic Roasters Export Hub", layout="wide")
@@ -211,8 +198,9 @@ def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship,
     pdf.set_y(y_mid + 35)
 
     # --- TABLE ---
-    w = [15, 65, 20, 25, 25, 20, 20]
-    headers = ["QTY", "DESCRIPTION", "NET KG", "HTS #", "FDA CODE", "UNIT ($)", "TOTAL ($)"]
+    # Widths updated: Removed Weight (20) -> Distributed to Desc/HTS/FDA
+    w = [15, 80, 25, 25, 22, 23] # Sum = 190
+    headers = ["QTY", "DESCRIPTION", "HTS #", "FDA CODE", "UNIT ($)", "TOTAL ($)"]
     pdf.set_font("Helvetica", 'B', 8)
     pdf.set_fill_color(220, 220, 220)
     for i, h in enumerate(headers):
@@ -220,17 +208,10 @@ def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship,
     pdf.ln()
     
     pdf.set_font("Helvetica", '', 8)
-    total_weight = 0
     
     for _, row in df.iterrows():
         qty = str(int(row['Quantity']))
-        # Use 'Final Desc' which comes from Catalog Description or Item Variant
-        desc = str(row['Final Desc'])[:45]
-        
-        weight_unit = float(row.get('Net Weight (kg)', 0) or 0)
-        line_weight = weight_unit * row['Quantity']
-        total_weight += line_weight
-        wgt_str = f"{line_weight:.2f}"
+        desc = str(row['Final Desc'])[:60] # Longer desc allowed now
         
         hts = str(row.get('HTS Code', '') or '')
         fda = str(row.get('FDA Code', '') or '')
@@ -239,16 +220,13 @@ def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship,
         
         pdf.cell(w[0], 6, qty, 1, 0, 'C')
         pdf.cell(w[1], 6, desc, 1, 0, 'L')
-        pdf.cell(w[2], 6, wgt_str, 1, 0, 'C')
-        pdf.cell(w[3], 6, hts, 1, 0, 'C')
-        pdf.cell(w[4], 6, fda, 1, 0, 'C')
-        pdf.cell(w[5], 6, price, 1, 0, 'R')
-        pdf.cell(w[6], 6, tot, 1, 1, 'R')
+        pdf.cell(w[2], 6, hts, 1, 0, 'C')
+        pdf.cell(w[3], 6, fda, 1, 0, 'C')
+        pdf.cell(w[4], 6, price, 1, 0, 'R')
+        pdf.cell(w[5], 6, tot, 1, 1, 'R')
 
     pdf.ln(2)
     pdf.set_font("Helvetica", 'B', 10)
-    pdf.cell(w[0]+w[1], 6, "TOTAL NET WEIGHT:", 0, 0, 'R')
-    pdf.cell(w[2], 6, f"{total_weight:.2f} KG", 1, 1, 'C')
     pdf.set_x(10)
     pdf.cell(sum(w[:-1]), 8, "TOTAL VALUE (USD):", 0, 0, 'R')
     pdf.cell(w[-1], 8, f"${total_val:,.2f}", 1, 1, 'R')
@@ -294,27 +272,18 @@ with tab_generate:
             
             if not catalog.empty:
                 catalog['sku'] = catalog['sku'].astype(str)
-                # Left Join
                 merged = pd.merge(sales_data, catalog, left_on='Variant code / SKU', right_on='sku', how='left')
                 
                 # 3. Fill values
-                # Description logic: Prefer Catalog Description -> Catalog Product Name -> Order Item Variant
                 merged['Final Desc'] = merged['description'].fillna(merged['product_name']).fillna(merged['Item variant'])
-                
                 merged['Final HTS'] = merged['hts_code'].fillna(DEFAULT_HTS)
                 merged['Final FDA'] = merged['fda_code'].fillna(DEFAULT_FDA)
-                
-                # Weight logic
-                merged['Temp Weight'] = merged['Item variant'].apply(estimate_weight_kg)
-                merged['Final Weight'] = merged['net_weight_kg'].fillna(merged['Temp Weight'])
-                
                 processed = merged.copy()
             else:
                 processed = sales_data.copy()
                 processed['Final Desc'] = processed['Item variant']
                 processed['Final HTS'] = DEFAULT_HTS
                 processed['Final FDA'] = DEFAULT_FDA
-                processed['Final Weight'] = processed['Item variant'].apply(estimate_weight_kg)
             
             # 4. Calculations
             processed['Transfer Price (Unit)'] = processed['Price per unit'] * (1 - discount_rate/100.0)
@@ -323,7 +292,6 @@ with tab_generate:
             # 5. Consolidate
             consolidated = processed.groupby(['Variant code / SKU', 'Final Desc']).agg({
                 'Quantity': 'sum',
-                'Final Weight': 'mean', 
                 'Final HTS': 'first',
                 'Final FDA': 'first',
                 'Transfer Price (Unit)': 'mean',
@@ -332,7 +300,6 @@ with tab_generate:
             
             consolidated.rename(columns={
                 'Final Desc': 'Item variant', 
-                'Final Weight': 'Net Weight (kg)',
                 'Final HTS': 'HTS Code', 
                 'Final FDA': 'FDA Code'
             }, inplace=True)
@@ -342,7 +309,6 @@ with tab_generate:
             edited_df = st.data_editor(
                 consolidated,
                 column_config={
-                    "Net Weight (kg)": st.column_config.NumberColumn("Unit Kg", format="%.3f"),
                     "Transfer Total": st.column_config.NumberColumn("Total $", format="$%.2f")
                 },
                 num_rows="dynamic"
@@ -391,8 +357,8 @@ with tab_catalog:
     
     # 1. Template
     with col_tools1:
-        # Added 'product_name' to columns
-        template_df = pd.DataFrame(columns=['sku', 'product_name', 'description', 'hts_code', 'fda_code', 'net_weight_kg'])
+        # Removed Weight from Template
+        template_df = pd.DataFrame(columns=['sku', 'product_name', 'description', 'hts_code', 'fda_code'])
         csv_template = template_df.to_csv(index=False).encode('utf-8')
         st.download_button("📥 Download Empty Template", csv_template, "catalog_template.csv", "text/csv")
     
@@ -415,8 +381,7 @@ with tab_catalog:
     if cat_upload:
         try:
             new_cat_df = pd.read_csv(cat_upload)
-            # Check for required cols
-            req_cols = ['sku', 'product_name', 'description', 'hts_code', 'fda_code', 'net_weight_kg']
+            req_cols = ['sku', 'product_name', 'description', 'hts_code', 'fda_code']
             if all(col in new_cat_df.columns for col in req_cols):
                 upsert_catalog_from_df(new_cat_df)
                 st.success("Catalog Updated Successfully!")
