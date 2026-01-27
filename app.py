@@ -2,16 +2,14 @@ import streamlit as st
 import pandas as pd
 import sqlite3
 from fpdf import FPDF
-from datetime import date, datetime
-import io
+from datetime import date
 import base64
+import re
 
 # --- Database Setup (SQLite) ---
-# This creates a local file 'invoices.db' to store history
 def init_db():
     conn = sqlite3.connect('invoices.db')
     c = conn.cursor()
-    # Create table if not exists
     c.execute('''CREATE TABLE IF NOT EXISTS invoice_history
                  (id INTEGER PRIMARY KEY AUTOINCREMENT,
                   invoice_number TEXT,
@@ -25,6 +23,7 @@ def init_db():
 def save_invoice_to_db(inv_num, total_val, pdf_bytes, buyer):
     conn = sqlite3.connect('invoices.db')
     c = conn.cursor()
+    # Check if exists to prevent duplicates (optional)
     c.execute("INSERT INTO invoice_history (invoice_number, date_created, total_value, pdf_data, buyer_name) VALUES (?, ?, ?, ?, ?)",
               (inv_num, date.today(), total_val, pdf_bytes, buyer))
     conn.commit()
@@ -44,273 +43,309 @@ def get_pdf_from_db(invoice_number):
     conn.close()
     return data[0] if data else None
 
-# Initialize DB on load
 init_db()
+
+# --- HELPER: Extract Weight from Name ---
+def estimate_weight_kg(variant_name):
+    # Look for "300g" or "907g" or "1kg"
+    variant_name = str(variant_name).lower()
+    
+    # Check grams
+    grams = re.search(r'(\d+)\s*g', variant_name)
+    if grams:
+        return float(grams.group(1)) / 1000.0
+    
+    # Check kg
+    kgs = re.search(r'(\d+(?:\.\d+)?)\s*kg', variant_name)
+    if kgs:
+        return float(kgs.group(1))
+    
+    return 0.0 # Default if not found
 
 # --- Page Config ---
 st.set_page_config(page_title="Holistic Roasters Export Hub", layout="wide")
 st.title("☕ Holistic Roasters Export Hub")
 
-# --- Tabs for Navigation ---
-tab_generate, tab_history = st.tabs(["📝 Generate New Invoice", "VX Invoice History"])
+# --- Tabs ---
+tab_generate, tab_history = st.tabs(["📝 Generate Invoice", "VX Invoice History"])
 
-# --- DEFAULT DATA ---
-DEFAULT_SELLER = "Holistic Roasters Canada\n123 Roastery Lane\nMontreal, QC, Canada"
-DEFAULT_BUYER = "Holistic Roasters USA\n456 Warehouse Blvd\nNew York, NY, USA"
-DEFAULT_SHIP_TO = "Holistic Roasters USA\n456 Warehouse Blvd\nNew York, NY, USA"
-DEFAULT_HTS = "0901.21.0000" # Roasted Coffee Not Decaf
-DEFAULT_FDA = "123-456-789"
+# --- DEFAULT DATA (From your Sample CI) ---
+DEFAULT_SHIPPER = """Holistic Roasters inc.
+3780 St-Patrick
+Montreal, QC, Canada H4E 1A2
+BN/GST: 780810917RC0001
+TVQ: 1225279701TQ0001"""
 
-# --- PDF GENERATOR (Professional Layout) ---
+DEFAULT_CONSIGNEE = """c/o FedEx Ship Center
+1049 US-11
+Champlain, NY 12919, United States"""
+
+DEFAULT_IMPORTER = """Holistic Roasters USA
+30 N Gould St, STE R
+Sheridan, WY 82801
+IRS/EIN: 32-082713200"""
+
+DEFAULT_NOTES = """CUSTOMS BROKER: Strix
+HOLISTIC ROASTERS inc. Canada FDA #: 11638755492
+- ALL PRICES IN USD
+- Incoterms: EXW"""
+
+DEFAULT_HTS = "0901.21.00.20" # Coffee Retail <2kg
+DEFAULT_FDA = "31ADT01"
+
+# --- PDF CLASS ---
 class ProInvoice(FPDF):
     def header(self):
-        # Logo placeholder or Company Name
+        # Title
         self.set_font('Helvetica', 'B', 20)
-        self.cell(0, 10, 'COMMERCIAL INVOICE', 0, 1, 'R')
+        self.cell(0, 10, 'COMMERCIAL INVOICE', 0, 1, 'C')
         self.ln(5)
 
     def footer(self):
-        self.set_y(-15)
+        self.set_y(-25)
         self.set_font('Helvetica', 'I', 8)
-        self.cell(0, 10, f'Page {self.page_no()}', 0, 0, 'C')
+        self.cell(0, 5, "I declare that all information contained in this invoice to be true and correct.", 0, 1, 'C')
+        self.cell(0, 5, "These goods are of Canadian origin (CUSMA/USMCA qualified).", 0, 1, 'C')
+        self.ln(2)
+        self.cell(0, 5, f'Page {self.page_no()}', 0, 0, 'C')
 
-def generate_pro_pdf(df, inv_num, inv_date, seller, buyer, ship_to, total_val, currency="USD"):
+def generate_pro_pdf(df, inv_num, inv_date, shipper, consignee, importer, notes, total_val):
     pdf = ProInvoice()
     pdf.add_page()
-    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.set_auto_page_break(auto=True, margin=20)
     
-    # --- TOP SECTION: DETAILS ---
+    # --- INFO BLOCK ---
+    pdf.set_font("Helvetica", '', 9)
+    y_top = pdf.get_y()
+    
+    # Column 1: Shipper
+    pdf.set_xy(10, y_top)
+    pdf.set_font("Helvetica", 'B', 10)
+    pdf.cell(60, 5, "SHIPPER / EXPORTER:", 0, 1)
+    pdf.set_font("Helvetica", '', 9)
+    pdf.multi_cell(60, 4, shipper)
+    y_shipper_end = pdf.get_y()
+    
+    # Column 2: Consignee
+    pdf.set_xy(75, y_top)
+    pdf.set_font("Helvetica", 'B', 10)
+    pdf.cell(60, 5, "CONSIGNEE (SHIP TO):", 0, 1)
+    pdf.set_font("Helvetica", '', 9)
+    pdf.multi_cell(60, 4, consignee)
+    
+    # Column 3: Invoice Details (Right Aligned)
+    pdf.set_xy(140, y_top)
+    pdf.set_font("Helvetica", 'B', 12)
+    pdf.cell(50, 6, f"Invoice #: {inv_num}", 0, 1, 'R')
     pdf.set_font("Helvetica", '', 10)
+    pdf.cell(50, 6, f"Date: {inv_date}", 0, 1, 'R')
+    pdf.cell(50, 6, "Currency: USD", 0, 1, 'R')
+    pdf.cell(50, 6, "Origin: CANADA", 0, 1, 'R')
     
-    # Left Block: Addresses
-    y_start = pdf.get_y()
+    # --- ROW 2: Importer & Notes ---
+    y_mid = max(y_shipper_end, pdf.get_y()) + 5
     
+    # Importer
+    pdf.set_xy(10, y_mid)
     pdf.set_font("Helvetica", 'B', 10)
-    pdf.cell(60, 5, "SELLER (EXPORTER):", 0, 1)
+    pdf.cell(80, 5, "IMPORTER OF RECORD (SOLD TO):", 0, 1)
     pdf.set_font("Helvetica", '', 9)
-    pdf.multi_cell(80, 5, seller)
-    pdf.ln(3)
+    pdf.multi_cell(80, 4, importer)
     
-    pdf.set_font("Helvetica", 'B', 10)
-    pdf.cell(60, 5, "SOLD TO (IMPORTER):", 0, 1)
-    pdf.set_font("Helvetica", '', 9)
-    pdf.multi_cell(80, 5, buyer)
-    pdf.ln(3)
-    
-    pdf.set_font("Helvetica", 'B', 10)
-    pdf.cell(60, 5, "SHIP TO:", 0, 1)
-    pdf.set_font("Helvetica", '', 9)
-    pdf.multi_cell(80, 5, ship_to)
-    
-    # Right Block: Invoice Info
-    x_right = 120
-    pdf.set_xy(x_right, y_start)
-    
-    pdf.set_font("Helvetica", 'B', 12)
-    pdf.cell(35, 8, "Invoice #:", 0, 0)
-    pdf.set_font("Helvetica", '', 12)
-    pdf.cell(40, 8, inv_num, 0, 1)
-    
-    pdf.set_xy(x_right, pdf.get_y())
-    pdf.set_font("Helvetica", 'B', 12)
-    pdf.cell(35, 8, "Date:", 0, 0)
-    pdf.set_font("Helvetica", '', 12)
-    pdf.cell(40, 8, str(inv_date), 0, 1)
-
-    pdf.set_xy(x_right, pdf.get_y())
-    pdf.set_font("Helvetica", 'B', 12)
-    pdf.cell(35, 8, "Currency:", 0, 0)
-    pdf.set_font("Helvetica", '', 12)
-    pdf.cell(40, 8, currency, 0, 1)
-    
-    pdf.ln(20) # Space before table
-    pdf.set_y(100) # Force table start position
-
-    # --- TABLE HEADER ---
+    # Notes Box
+    pdf.set_xy(100, y_mid)
+    pdf.set_fill_color(245, 245, 245)
+    pdf.rect(100, y_mid, 90, 30, 'F')
+    pdf.set_xy(102, y_mid + 2)
     pdf.set_font("Helvetica", 'B', 9)
-    pdf.set_fill_color(230, 230, 230)
-    
-    # Define Column Widths
-    w_sku = 25
-    w_desc = 70
-    w_hts = 25
-    w_qty = 15
-    w_price = 25
-    w_total = 30
-    
-    pdf.cell(w_sku, 8, "SKU", 1, 0, 'C', fill=True)
-    pdf.cell(w_desc, 8, "Description", 1, 0, 'C', fill=True)
-    pdf.cell(w_hts, 8, "HTS / FDA", 1, 0, 'C', fill=True)
-    pdf.cell(w_qty, 8, "Qty", 1, 0, 'C', fill=True)
-    pdf.cell(w_price, 8, "Unit Price", 1, 0, 'C', fill=True)
-    pdf.cell(w_total, 8, "Total Value", 1, 1, 'C', fill=True)
-
-    # --- TABLE ROWS ---
+    pdf.cell(50, 5, "NOTES / BROKER / FDA:", 0, 1)
     pdf.set_font("Helvetica", '', 8)
-    for _, row in df.iterrows():
-        sku = str(row['Variant code / SKU'])
-        desc = str(row['Item variant'])[:45] # Truncate
-        hts = f"{row.get('HTS Code', '')}\n{row.get('FDA Code', '')}"
-        qty = str(int(row['Quantity']))
-        price = f"${row['Transfer Price (Unit)']:.2f}"
-        tot = f"${row['Transfer Total']:.2f}"
-        
-        # Calculate height needed
-        h = 10 # slightly taller for HTS stack
-        
-        x_curr = pdf.get_x()
-        y_curr = pdf.get_y()
-        
-        # Draw cells
-        pdf.rect(x_curr, y_curr, w_sku, h)
-        pdf.cell(w_sku, h, sku, 0, 0, 'L')
-        
-        pdf.rect(x_curr + w_sku, y_curr, w_desc, h)
-        pdf.set_xy(x_curr + w_sku, y_curr)
-        pdf.cell(w_desc, h, desc, 0, 0, 'L')
-        
-        pdf.rect(x_curr + w_sku + w_desc, y_curr, w_hts, h)
-        pdf.set_xy(x_curr + w_sku + w_desc, y_curr + 2) # small padding top
-        pdf.multi_cell(w_hts, 3, hts, 0, 'C')
-        pdf.set_xy(x_curr + w_sku + w_desc + w_hts, y_curr) # Reset to right of HTS
+    pdf.set_xy(102, pdf.get_y())
+    pdf.multi_cell(85, 4, notes)
+    
+    pdf.set_y(y_mid + 35) # Move below everything
 
-        pdf.rect(x_curr + w_sku + w_desc + w_hts, y_curr, w_qty, h)
-        pdf.cell(w_qty, h, qty, 0, 0, 'C')
+    # --- TABLE ---
+    # Widths: QTY(15), DESC(65), WGT(20), HTS(25), FDA(25), PRICE(20), TOT(20)
+    w = [15, 65, 20, 25, 25, 20, 20]
+    h = 60
+    
+    pdf.set_font("Helvetica", 'B', 8)
+    pdf.set_fill_color(220, 220, 220)
+    headers = ["QTY", "DESCRIPTION", "NET KG", "HTS #", "FDA CODE", "UNIT ($)", "TOTAL ($)"]
+    
+    for i, head in enumerate(headers):
+        pdf.cell(w[i], 8, head, 1, 0, 'C', fill=True)
+    pdf.ln()
+    
+    # Rows
+    pdf.set_font("Helvetica", '', 8)
+    total_weight = 0
+    
+    for _, row in df.iterrows():
+        # Data Prep
+        qty = str(int(row['Quantity']))
+        desc = str(row['Item variant'])[:45]
         
-        pdf.rect(x_curr + w_sku + w_desc + w_hts + w_qty, y_curr, w_price, h)
-        pdf.cell(w_price, h, price, 0, 0, 'R')
+        # Net Weight Calculation
+        weight_unit = row.get('Net Weight (kg)', 0)
+        line_weight = weight_unit * row['Quantity']
+        total_weight += line_weight
+        wgt_str = f"{line_weight:.2f}"
         
-        pdf.rect(x_curr + w_sku + w_desc + w_hts + w_qty + w_price, y_curr, w_total, h)
-        pdf.cell(w_total, h, tot, 0, 1, 'R')
+        hts = str(row.get('HTS Code', ''))
+        fda = str(row.get('FDA Code', ''))
+        price = f"{row['Transfer Price (Unit)']:.2f}"
+        tot = f"{row['Transfer Total']:.2f}"
+        
+        # Draw Cells
+        # Save Y to ensure all cells are same height
+        y_line = pdf.get_y()
+        x_line = pdf.get_x()
+        
+        pdf.cell(w[0], 6, qty, 1, 0, 'C')
+        pdf.cell(w[1], 6, desc, 1, 0, 'L')
+        pdf.cell(w[2], 6, wgt_str, 1, 0, 'C')
+        pdf.cell(w[3], 6, hts, 1, 0, 'C')
+        pdf.cell(w[4], 6, fda, 1, 0, 'C')
+        pdf.cell(w[5], 6, price, 1, 0, 'R')
+        pdf.cell(w[6], 6, tot, 1, 1, 'R')
 
     # --- TOTALS ---
-    pdf.ln(5)
-    pdf.set_font("Helvetica", 'B', 12)
-    pdf.cell(160, 10, "TOTAL INVOICE VALUE (USD):", 0, 0, 'R')
-    pdf.cell(30, 10, f"${total_val:,.2f}", 0, 1, 'R')
-
-    # --- DECLARATION ---
-    pdf.ln(10)
-    pdf.set_font("Helvetica", '', 9)
-    pdf.multi_cell(0, 5, "I declare that all information contained in this invoice to be true and correct. These goods are of Canadian origin (CUSMA/USMCA qualified).")
+    pdf.ln(2)
+    pdf.set_font("Helvetica", 'B', 10)
     
+    # Weight Total
+    pdf.cell(w[0]+w[1], 6, "TOTAL NET WEIGHT:", 0, 0, 'R')
+    pdf.cell(w[2], 6, f"{total_weight:.2f} KG", 1, 1, 'C')
+    
+    # Value Total
+    pdf.set_x(10)
+    pdf.cell(sum(w[:-1]), 8, "TOTAL INVOICE VALUE (USD):", 0, 0, 'R')
+    pdf.cell(w[-1], 8, f"${total_val:,.2f}", 1, 1, 'R')
+    
+    # Signature
     pdf.ln(15)
-    pdf.cell(80, 0, "__________________________", 0, 1)
-    pdf.cell(80, 5, "Authorized Signature", 0, 1)
+    pdf.cell(100, 0, "__________________________", 0, 1)
+    pdf.cell(100, 5, "Authorized Signature", 0, 1)
 
     return bytes(pdf.output())
 
 # ================= TAB 1: GENERATE =================
 with tab_generate:
-    col_left, col_mid, col_right = st.columns([1, 1, 1])
+    # --- 1. SETTINGS & ADDRESSES ---
+    with st.expander("📝 Invoice Details & Addresses", expanded=True):
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            inv_number = st.text_input("Invoice #", value=f"INV-{date.today().strftime('%Y%m%d')}")
+            inv_date = st.date_input("Date", value=date.today())
+            discount_rate = st.slider("Discount %", 0, 100, 50)
+        with c2:
+            shipper_txt = st.text_area("Shipper / Exporter", value=DEFAULT_SHIPPER, height=120)
+            importer_txt = st.text_area("Importer (Sold To)", value=DEFAULT_IMPORTER, height=100)
+        with c3:
+            consignee_txt = st.text_area("Consignee (Ship To)", value=DEFAULT_CONSIGNEE, height=120)
+            notes_txt = st.text_area("Broker / Notes", value=DEFAULT_NOTES, height=100)
     
-    with col_left:
-        st.subheader("1. Configuration")
-        # Editable Invoice #
-        default_inv = f"INV-{date.today().strftime('%Y%m%d')}"
-        inv_number = st.text_input("Invoice Number", value=default_inv)
-        inv_date = st.date_input("Invoice Date", value=date.today())
-        
-        discount_rate = st.slider("Discount %", 0, 100, 50)
-    
-    with col_mid:
-        st.subheader("2. Addresses")
-        seller_info = st.text_area("Seller (Exporter)", value=DEFAULT_SELLER, height=100)
-        buyer_info = st.text_area("Buyer (Importer)", value=DEFAULT_BUYER, height=100)
-        ship_to_info = st.text_area("Ship To", value=DEFAULT_SHIP_TO, height=100)
+    # --- 2. UPLOAD & DATA ---
+    st.subheader("Upload Orders")
+    uploaded_file = st.file_uploader("Upload CSV", type=['csv'])
 
-    with col_right:
-        st.subheader("3. Codes & Upload")
-        default_hts_code = st.text_input("Default HTS Code", value=DEFAULT_HTS)
-        default_fda_code = st.text_input("Default FDA Code", value=DEFAULT_FDA)
-        uploaded_file = st.file_uploader("Upload CSV", type=['csv'])
-
-    st.markdown("---")
-
-    # --- Processing Logic ---
     if uploaded_file:
         try:
             df = pd.read_csv(uploaded_file)
             
-            # Filter & Calc
+            # Filter US & Products
             us_shipments = df[df['Ship to country'] == 'United States'].copy()
             if 'Item type' in df.columns:
                 us_shipments = us_shipments[us_shipments['Item type'] == 'product']
             
+            # Logic: Select & Rename
+            # We assume columns exist. If "Item variant" is missing, check your CSV
             processed = us_shipments[['Variant code / SKU', 'Item variant', 'Quantity', 'Price per unit']].copy()
+            
+            # Auto-Calculate Weight (The Magic Feature)
+            processed['Net Weight (kg)'] = processed['Item variant'].apply(estimate_weight_kg)
+            
+            # Calculate Prices
             processed['Transfer Price (Unit)'] = processed['Price per unit'] * (1 - discount_rate/100.0)
             processed['Transfer Total'] = processed['Quantity'] * processed['Transfer Price (Unit)']
             
             # Consolidate
             consolidated = processed.groupby(['Variant code / SKU', 'Item variant']).agg({
                 'Quantity': 'sum',
+                'Net Weight (kg)': 'sum', # Sum weight per line
                 'Transfer Price (Unit)': 'mean',
                 'Transfer Total': 'sum'
             }).reset_index()
             
-            # Add HTS/FDA Columns (Editable in Data Editor)
-            consolidated['HTS Code'] = default_hts_code
-            consolidated['FDA Code'] = default_fda_code
+            # Fix Weight: If we grouped 5 items of 0.3kg, the sum is 1.5kg. 
+            # But we want 'Unit Weight'. So we should take the mean of weight or re-calc.
+            # Better approach: Keep Unit Weight separate.
+            # Let's re-apply weight estimation to the consolidated rows to be safe.
+            consolidated['Net Weight (kg)'] = consolidated['Item variant'].apply(estimate_weight_kg)
             
-            st.subheader("4. Review & Edit Line Items")
-            st.info("You can edit HTS or FDA codes for specific items in the table below.")
+            # Add Codes
+            consolidated['HTS Code'] = DEFAULT_HTS
+            consolidated['FDA Code'] = DEFAULT_FDA
             
-            # EDITABLE DATAFRAME
-            edited_df = st.data_editor(consolidated, num_rows="dynamic")
+            # --- 3. EDITABLE TABLE ---
+            st.info("👇 Click on any cell below to edit HTS codes, FDA codes, or Weights.")
+            edited_df = st.data_editor(
+                consolidated,
+                column_config={
+                    "Net Weight (kg)": st.column_config.NumberColumn("Unit Net Wgt (kg)", format="%.3f"),
+                    "Transfer Price (Unit)": st.column_config.NumberColumn("Unit Price ($)", format="$%.2f"),
+                    "Transfer Total": st.column_config.NumberColumn("Total ($)", format="$%.2f")
+                },
+                num_rows="dynamic"
+            )
             
             total_val = edited_df['Transfer Total'].sum()
-            st.metric("Total Invoice Value", f"${total_val:,.2f}")
             
-            # --- ACTION BUTTONS ---
-            col_act1, col_act2 = st.columns(2)
+            # --- 4. PREVIEW & SAVE ---
+            col_act1, col_act2 = st.columns([1, 2])
             
-            # Generate PDF in memory
-            pdf_bytes = generate_pro_pdf(edited_df, inv_number, inv_date, seller_info, buyer_info, ship_to_info, total_val)
+            # Generate PDF
+            pdf_bytes = generate_pro_pdf(edited_df, inv_number, inv_date, shipper_txt, consignee_txt, importer_txt, notes_txt, total_val)
             
             with col_act1:
                 st.download_button(
-                    label="📄 Download PDF Only",
+                    label="📄 Download PDF",
                     data=pdf_bytes,
                     file_name=f"{inv_number}.pdf",
                     mime="application/pdf"
                 )
+                if st.button("💾 Save to History"):
+                    save_invoice_to_db(inv_number, total_val, pdf_bytes, importer_txt.split('\n')[0])
+                    st.success(f"Saved {inv_number}!")
             
             with col_act2:
-                if st.button("💾 Save to Database & Finish"):
-                    save_invoice_to_db(inv_number, total_val, pdf_bytes, buyer_info.split('\n')[0])
-                    st.success(f"Invoice {inv_number} saved to history successfully!")
-                    st.balloons()
-
-            # Preview
-            b64_pdf = base64.b64encode(pdf_bytes).decode('utf-8')
-            pdf_display = f'<iframe src="data:application/pdf;base64,{b64_pdf}" width="100%" height="600" type="application/pdf"></iframe>'
-            st.markdown("### Preview")
-            st.markdown(pdf_display, unsafe_allow_html=True)
+                # Preview
+                b64_pdf = base64.b64encode(pdf_bytes).decode('utf-8')
+                pdf_display = f'<iframe src="data:application/pdf;base64,{b64_pdf}" width="100%" height="800" type="application/pdf"></iframe>'
+                st.markdown(pdf_display, unsafe_allow_html=True)
 
         except Exception as e:
-            st.error(f"Error: {e}")
+            st.error(f"Error processing file: {e}")
 
 # ================= TAB 2: HISTORY =================
 with tab_history:
-    st.header("Invoice Archive")
-    
-    # Load Data
+    st.header("🗄️ Invoice Archive")
     history_df = get_history()
+    st.dataframe(history_df, use_container_width=True)
     
-    # Display Table
-    st.dataframe(history_df)
-    
-    st.subheader("Retrieve Document")
-    search_inv = st.selectbox("Select Invoice Number to Download", history_df['invoice_number'].unique())
-    
-    if st.button("Fetch PDF"):
-        pdf_data = get_pdf_from_db(search_inv)
-        if pdf_data:
-            st.download_button(
-                label=f"Download {search_inv}",
-                data=pdf_data,
-                file_name=f"{search_inv}.pdf",
-                mime="application/pdf"
-            )
-        else:
-            st.error("File not found in database.")
+    inv_list = history_df['invoice_number'].unique()
+    if len(inv_list) > 0:
+        col_h1, col_h2 = st.columns(2)
+        with col_h1:
+            selected_inv = st.selectbox("Select Invoice to View:", inv_list)
+        with col_h2:
+            st.write("") # Spacer
+            st.write("")
+            if st.button("Retrieve Document"):
+                pdf_data = get_pdf_from_db(selected_inv)
+                if pdf_data:
+                    st.download_button(f"Download {selected_inv}", pdf_data, file_name=f"{selected_inv}.pdf", mime="application/pdf")
+                else:
+                    st.warning("Document not found.")
