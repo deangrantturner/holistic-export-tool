@@ -19,9 +19,11 @@ def init_db():
                   total_value REAL,
                   pdf_data BLOB,
                   buyer_name TEXT)''')
-    # Catalog Table (Master SKU List)
-    c.execute('''CREATE TABLE IF NOT EXISTS product_catalog
+    
+    # Catalog Table V2 (Updated schema with Product Name)
+    c.execute('''CREATE TABLE IF NOT EXISTS product_catalog_v2
                  (sku TEXT PRIMARY KEY,
+                  product_name TEXT,
                   description TEXT,
                   hts_code TEXT,
                   fda_code TEXT,
@@ -55,33 +57,38 @@ def get_pdf_from_db(invoice_number):
 # --- DB: Catalog Functions ---
 def get_catalog():
     conn = sqlite3.connect('invoices.db')
-    # Return as DataFrame
-    df = pd.read_sql_query("SELECT * FROM product_catalog", conn)
+    df = pd.read_sql_query("SELECT * FROM product_catalog_v2", conn)
     conn.close()
     return df
 
 def upsert_catalog_from_df(df):
     conn = sqlite3.connect('invoices.db')
     c = conn.cursor()
-    # Upsert logic (Insert or Replace)
     for _, row in df.iterrows():
-        c.execute("""INSERT OR REPLACE INTO product_catalog 
-                     (sku, description, hts_code, fda_code, net_weight_kg) 
-                     VALUES (?, ?, ?, ?, ?)""",
-                  (str(row['sku']), row['description'], str(row['hts_code']), str(row['fda_code']), row['net_weight_kg']))
+        # Clean data
+        p_name = row.get('product_name', '')
+        desc = row.get('description', '')
+        # Fallback: if description is empty, use product name
+        if pd.isna(desc) or desc == "":
+            desc = p_name
+            
+        c.execute("""INSERT OR REPLACE INTO product_catalog_v2 
+                     (sku, product_name, description, hts_code, fda_code, net_weight_kg) 
+                     VALUES (?, ?, ?, ?, ?, ?)""",
+                  (str(row['sku']), p_name, desc, str(row['hts_code']), str(row['fda_code']), row['net_weight_kg']))
     conn.commit()
     conn.close()
 
 def clear_catalog():
     conn = sqlite3.connect('invoices.db')
     c = conn.cursor()
-    c.execute("DELETE FROM product_catalog")
+    c.execute("DELETE FROM product_catalog_v2")
     conn.commit()
     conn.close()
 
 init_db()
 
-# --- HELPER: Weight Estimation (Fallback) ---
+# --- HELPER: Weight Estimation ---
 def estimate_weight_kg(variant_name):
     variant_name = str(variant_name).lower()
     grams = re.search(r'(\d+)\s*g', variant_name)
@@ -217,9 +224,10 @@ def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship,
     
     for _, row in df.iterrows():
         qty = str(int(row['Quantity']))
-        desc = str(row['Item variant'])[:45]
+        # Use 'Final Desc' which comes from Catalog Description or Item Variant
+        desc = str(row['Final Desc'])[:45]
         
-        weight_unit = float(row.get('Net Weight (kg)', 0) or 0) # ensure float
+        weight_unit = float(row.get('Net Weight (kg)', 0) or 0)
         line_weight = weight_unit * row['Quantity']
         total_weight += line_weight
         wgt_str = f"{line_weight:.2f}"
@@ -279,31 +287,29 @@ with tab_generate:
             # --- MERGE LOGIC WITH CATALOG ---
             # 1. Prepare raw sales data
             sales_data = us_shipments[['Variant code / SKU', 'Item variant', 'Quantity', 'Price per unit']].copy()
-            sales_data['Variant code / SKU'] = sales_data['Variant code / SKU'].astype(str) # Ensure string match
+            sales_data['Variant code / SKU'] = sales_data['Variant code / SKU'].astype(str)
             
             # 2. Load Catalog
             catalog = get_catalog()
             
             if not catalog.empty:
                 catalog['sku'] = catalog['sku'].astype(str)
-                # Left Join: Keep all sales, pull info from catalog where available
+                # Left Join
                 merged = pd.merge(sales_data, catalog, left_on='Variant code / SKU', right_on='sku', how='left')
                 
-                # 3. Fill values: Use Catalog if exists, else Default/Regex
-                # Description
-                merged['Final Desc'] = merged['description'].fillna(merged['Item variant'])
-                # HTS
+                # 3. Fill values
+                # Description logic: Prefer Catalog Description -> Catalog Product Name -> Order Item Variant
+                merged['Final Desc'] = merged['description'].fillna(merged['product_name']).fillna(merged['Item variant'])
+                
                 merged['Final HTS'] = merged['hts_code'].fillna(DEFAULT_HTS)
-                # FDA
                 merged['Final FDA'] = merged['fda_code'].fillna(DEFAULT_FDA)
-                # Weight: Catalog Wgt -> Regex Guess -> 0
+                
+                # Weight logic
                 merged['Temp Weight'] = merged['Item variant'].apply(estimate_weight_kg)
                 merged['Final Weight'] = merged['net_weight_kg'].fillna(merged['Temp Weight'])
                 
-                # Cleanup
                 processed = merged.copy()
             else:
-                # No catalog, use fallback logic
                 processed = sales_data.copy()
                 processed['Final Desc'] = processed['Item variant']
                 processed['Final HTS'] = DEFAULT_HTS
@@ -317,14 +323,13 @@ with tab_generate:
             # 5. Consolidate
             consolidated = processed.groupby(['Variant code / SKU', 'Final Desc']).agg({
                 'Quantity': 'sum',
-                'Final Weight': 'mean', # Unit weight should be constant
+                'Final Weight': 'mean', 
                 'Final HTS': 'first',
                 'Final FDA': 'first',
                 'Transfer Price (Unit)': 'mean',
                 'Transfer Total': 'sum'
             }).reset_index()
             
-            # Rename for display
             consolidated.rename(columns={
                 'Final Desc': 'Item variant', 
                 'Final Weight': 'Net Weight (kg)',
@@ -333,7 +338,7 @@ with tab_generate:
             }, inplace=True)
             
             # 6. Editable Table
-            st.info("👇 Review Line Items (Data merged from Catalog)")
+            st.info("👇 Review Line Items (Auto-filled from Catalog)")
             edited_df = st.data_editor(
                 consolidated,
                 column_config={
@@ -380,13 +385,14 @@ with tab_generate:
 # ================= TAB 2: PRODUCT CATALOG =================
 with tab_catalog:
     st.header("📦 Product Catalog (Master List)")
-    st.markdown("This list is used to auto-fill details when you generate invoices.")
+    st.markdown("Auto-fill Invoice Descriptions, HTS, and FDA codes by SKU.")
     
     col_tools1, col_tools2, col_tools3 = st.columns(3)
     
-    # 1. Template Download
+    # 1. Template
     with col_tools1:
-        template_df = pd.DataFrame(columns=['sku', 'description', 'hts_code', 'fda_code', 'net_weight_kg'])
+        # Added 'product_name' to columns
+        template_df = pd.DataFrame(columns=['sku', 'product_name', 'description', 'hts_code', 'fda_code', 'net_weight_kg'])
         csv_template = template_df.to_csv(index=False).encode('utf-8')
         st.download_button("📥 Download Empty Template", csv_template, "catalog_template.csv", "text/csv")
     
@@ -403,14 +409,14 @@ with tab_catalog:
             clear_catalog()
             st.experimental_rerun()
 
-    # Upload New Catalog
+    # Upload
     st.subheader("Upload Catalog (CSV)")
     cat_upload = st.file_uploader("Upload filled template to update catalog", type=['csv'])
     if cat_upload:
         try:
             new_cat_df = pd.read_csv(cat_upload)
-            # Validate columns
-            req_cols = ['sku', 'description', 'hts_code', 'fda_code', 'net_weight_kg']
+            # Check for required cols
+            req_cols = ['sku', 'product_name', 'description', 'hts_code', 'fda_code', 'net_weight_kg']
             if all(col in new_cat_df.columns for col in req_cols):
                 upsert_catalog_from_df(new_cat_df)
                 st.success("Catalog Updated Successfully!")
