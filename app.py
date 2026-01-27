@@ -332,7 +332,8 @@ with tab_generate:
                 saved_sig = get_signature()
                 if saved_sig:
                     st.success("✅ Signature on file")
-                    if st.button("Clear Signature", size="small"):
+                    # FIXED LINE BELOW - removed size parameter
+                    if st.button("Clear Signature"):
                         conn = sqlite3.connect('invoices.db')
                         conn.execute("DELETE FROM settings WHERE key='signature'")
                         conn.commit()
