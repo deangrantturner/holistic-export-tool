@@ -373,7 +373,7 @@ with tab_catalog:
     with col_tools3:
         if st.button("⚠️ Clear Entire Catalog"):
             clear_catalog()
-            st.experimental_rerun()
+            st.rerun()
 
     # Upload
     st.subheader("Upload Catalog (CSV)")
@@ -385,7 +385,7 @@ with tab_catalog:
             if all(col in new_cat_df.columns for col in req_cols):
                 upsert_catalog_from_df(new_cat_df)
                 st.success("Catalog Updated Successfully!")
-                st.experimental_rerun()
+                st.rerun()
             else:
                 st.error(f"CSV must have columns: {req_cols}")
         except Exception as e:
