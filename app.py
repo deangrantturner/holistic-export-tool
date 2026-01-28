@@ -347,8 +347,7 @@ def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship,
         # Calculate Max Row Height using Pixel-Perfect Logic
         max_lines = 1
         for i, (txt, align) in enumerate(data_row):
-            # Check lines needed for this column
-            lines = get_lines_needed(txt, w[i] - 2) # -2 for padding
+            lines = get_lines_needed(txt, w[i] - 2) 
             if lines > max_lines: max_lines = lines
             
         row_h = max_lines * line_h
@@ -409,7 +408,7 @@ def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship,
 
     return bytes(pdf.output())
 
-# --- BOL GENERATOR (PIXEL-PERFECT FIX) ---
+# --- BOL GENERATOR (VERTICAL STACK FIX) ---
 def generate_bol_pdf(df, inv_number, inv_date, shipper_txt, consignee_txt, carrier_name, hbol_number, pallets, cartons, total_weight_lbs, sig_bytes=None):
     pdf = FPDF()
     pdf.add_page()
@@ -445,7 +444,41 @@ def generate_bol_pdf(df, inv_number, inv_date, shipper_txt, consignee_txt, carri
     
     pdf.ln(10)
     
-    # --- HELPER: Exact Line Counter ---
+    # --- VERTICAL ADDRESS STACK ---
+    # Shipper (Top)
+    pdf.set_x(10)
+    pdf.set_font("Helvetica", 'B', 11)
+    pdf.cell(0, 6, "SHIP FROM (SHIPPER)", 1, 1, 'L', fill=False)
+    pdf.set_font("Helvetica", '', 9)
+    pdf.multi_cell(0, 5, shipper_txt, 1, 'L')
+    
+    pdf.ln(5)
+    
+    # Consignee (Below)
+    pdf.set_x(10)
+    pdf.set_font("Helvetica", 'B', 11)
+    pdf.cell(0, 6, "SHIP TO (CONSIGNEE)", 1, 1, 'L', fill=False)
+    pdf.set_font("Helvetica", '', 9)
+    pdf.multi_cell(0, 5, consignee_txt, 1, 'L')
+    
+    pdf.ln(5)
+    
+    # Carrier
+    pdf.set_font("Helvetica", 'B', 11)
+    pdf.cell(0, 6, f"CARRIER: {carrier_name}", 0, 1)
+    pdf.ln(5)
+    
+    # --- HANDLING UNITS TABLE (GRID SYSTEM) ---
+    w = [15, 25, 100, 30, 20] 
+    headers = ["HM", "QTY", "DESCRIPTION OF COMMODITY", "WEIGHT", "CLASS"]
+    
+    pdf.set_font("Helvetica", 'B', 9)
+    pdf.set_fill_color(220, 220, 220)
+    for i, h in enumerate(headers):
+        pdf.cell(w[i], 8, h, 1, 0, 'C', fill=True)
+    pdf.ln()
+    
+    # Helper: Exact Line Counter
     def get_lines_needed(text, width):
         if not text: return 1
         lines = 0
@@ -466,44 +499,6 @@ def generate_bol_pdf(df, inv_number, inv_date, shipper_txt, consignee_txt, carri
             lines += lines_para
         return lines
 
-    # Addresses (Using accurate calc)
-    y_addr = pdf.get_y()
-    
-    # Shipper
-    pdf.set_xy(10, y_addr)
-    pdf.set_font("Helvetica", 'B', 11)
-    pdf.cell(90, 6, "SHIP FROM (SHIPPER)", 1, 1, 'L', fill=False)
-    pdf.set_font("Helvetica", '', 9)
-    shipper_lines = get_lines_needed(shipper_txt, 90)
-    pdf.multi_cell(90, 5, shipper_txt, 1, 'L')
-    y_ship_end = pdf.get_y()
-    
-    # Consignee
-    pdf.set_xy(110, y_addr)
-    pdf.set_font("Helvetica", 'B', 11)
-    pdf.cell(90, 6, "SHIP TO (CONSIGNEE)", 1, 1, 'L', fill=False)
-    pdf.set_font("Helvetica", '', 9)
-    consignee_lines = get_lines_needed(consignee_txt, 90)
-    pdf.multi_cell(90, 5, consignee_txt, 1, 'L')
-    y_con_end = pdf.get_y()
-    
-    new_y = max(y_ship_end, y_con_end) + 10
-    pdf.set_y(new_y)
-    
-    pdf.set_font("Helvetica", 'B', 11)
-    pdf.cell(0, 6, f"CARRIER: {carrier_name}", 0, 1)
-    pdf.ln(5)
-    
-    # --- HANDLING UNITS TABLE (GRID SYSTEM) ---
-    w = [15, 25, 100, 30, 20] 
-    headers = ["HM", "QTY", "DESCRIPTION OF COMMODITY", "WEIGHT", "CLASS"]
-    
-    pdf.set_font("Helvetica", 'B', 9)
-    pdf.set_fill_color(220, 220, 220)
-    for i, h in enumerate(headers):
-        pdf.cell(w[i], 8, h, 1, 0, 'C', fill=True)
-    pdf.ln()
-    
     # --- HELPER FUNCTION FOR GRID ROW ---
     def print_grid_row(data_list):
         pdf.set_font("Helvetica", '', 9)
@@ -512,7 +507,7 @@ def generate_bol_pdf(df, inv_number, inv_date, shipper_txt, consignee_txt, carri
         
         # 1. Measure all cells with EXACT method
         for i, (txt, align) in enumerate(data_list):
-            lines = get_lines_needed(txt, w[i] - 2) # Padding buffer
+            lines = get_lines_needed(txt, w[i] - 2)
             if lines > max_lines: max_lines = lines
         
         row_h = max_lines * line_h
@@ -590,7 +585,7 @@ def generate_bol_pdf(df, inv_number, inv_date, shipper_txt, consignee_txt, carri
             # Place image above the Shipper line
             pdf.image(tmp_path, x=15, y=y_sig-15, w=35) 
         except:
-            pass # Fail silently
+            pass
         os.unlink(tmp_path)
     
     return bytes(pdf.output())
