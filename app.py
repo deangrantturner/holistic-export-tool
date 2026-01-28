@@ -26,7 +26,6 @@ def init_db():
                   total_value REAL,
                   buyer_name TEXT)''')
     
-    # Create Catalog Table
     c.execute('''CREATE TABLE IF NOT EXISTS product_catalog_v3
                  (sku TEXT PRIMARY KEY,
                   product_name TEXT,
@@ -34,11 +33,10 @@ def init_db():
                   hts_code TEXT,
                   fda_code TEXT)''')
     
-    # MIGRATION: Add 'weight_lbs' column if it doesn't exist
     try:
         c.execute("ALTER TABLE product_catalog_v3 ADD COLUMN weight_lbs REAL")
     except:
-        pass # Column likely already exists
+        pass 
                   
     c.execute('''CREATE TABLE IF NOT EXISTS settings
                  (key TEXT PRIMARY KEY,
@@ -93,15 +91,10 @@ def upsert_catalog_from_df(df):
         p_name = row.get('product_name', '')
         desc = row.get('description', '')
         weight = row.get('weight_lbs', 0.0)
-        
-        # Handle potential empty/NaN weight
-        try:
-            weight = float(weight)
-        except:
-            weight = 0.0
+        try: weight = float(weight)
+        except: weight = 0.0
 
-        if pd.isna(desc) or desc == "":
-            desc = p_name
+        if pd.isna(desc) or desc == "": desc = p_name
             
         c.execute("""INSERT OR REPLACE INTO product_catalog_v3 
                      (sku, product_name, description, hts_code, fda_code, weight_lbs) 
@@ -173,16 +166,10 @@ st.markdown("""
 
         .stApp { background-color: #FAFAFA; font-family: 'Open Sans', sans-serif; }
         
-        /* STICKY TABS */
         div[data-testid="stTabs"] > div:first-child {
-            position: sticky !important;
-            top: 0px !important;
-            z-index: 99999 !important;
-            background-color: #FAFAFA !important;
-            padding-top: 15px;
-            padding-bottom: 10px;
-            border-bottom: 2px solid #E0E0E0;
-            box-shadow: 0px 4px 6px rgba(0,0,0,0.05);
+            position: sticky !important; top: 0px !important; z-index: 99999 !important;
+            background-color: #FAFAFA !important; padding-top: 15px; padding-bottom: 10px;
+            border-bottom: 2px solid #E0E0E0; box-shadow: 0px 4px 6px rgba(0,0,0,0.05);
         }
 
         h1, h2, h3 { font-family: 'Montserrat', sans-serif !important; color: #6F4E37 !important; font-weight: 700; }
@@ -228,7 +215,6 @@ HOLISTIC ROASTERS inc. Canada FDA #: 11638755492
 DEFAULT_HTS = "0901.21.00.20"
 DEFAULT_FDA = "31ADT01"
 
-# --- PDF GENERATOR CLASS ---
 class ProInvoice(FPDF):
     def header(self):
         pass
@@ -240,16 +226,14 @@ def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship,
     pdf.add_page()
     pdf.set_auto_page_break(auto=False)
     
-    # Header
     pdf.set_font('Helvetica', 'B', 20)
     pdf.cell(0, 10, doc_type, 0, 1, 'C')
     pdf.ln(5)
 
-    # Info Blocks
     pdf.set_font("Helvetica", '', 9)
     y_start = pdf.get_y()
     
-    # Col 1
+    # Column 1
     pdf.set_xy(10, y_start)
     pdf.set_font("Helvetica", 'B', 10)
     lbl_from = "SHIPPER / EXPORTER:" if "COMMERCIAL" in doc_type else "FROM (SELLER):"
@@ -260,7 +244,7 @@ def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship,
     pdf.multi_cell(70, 4, addr_from)
     y_end_1 = pdf.get_y()
 
-    # Col 2
+    # Column 2
     pdf.set_xy(90, y_start) 
     pdf.set_font("Helvetica", 'B', 10)
     lbl_to = "CONSIGNEE (SHIP TO):" if "COMMERCIAL" in doc_type else "SHIP TO:"
@@ -270,7 +254,7 @@ def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship,
     pdf.multi_cell(70, 4, addr_ship)
     y_end_2 = pdf.get_y()
 
-    # Col 3
+    # Column 3
     x_right = 160
     pdf.set_xy(x_right, y_start)
     pdf.set_font("Helvetica", 'B', 12)
@@ -402,22 +386,19 @@ def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship,
 
     return bytes(pdf.output())
 
-# --- NEW: BOL GENERATOR ---
+# --- BOL GENERATOR ---
 def generate_bol_pdf(df, inv_number, inv_date, shipper_txt, consignee_txt, carrier_name, hbol_number, pallets, cartons, total_weight_lbs):
     pdf = FPDF()
     pdf.add_page()
     pdf.set_auto_page_break(auto=True, margin=15)
     
-    # Title
     pdf.set_font('Helvetica', 'B', 18)
     pdf.cell(0, 10, "STRAIGHT BILL OF LADING", 0, 1, 'C')
     pdf.ln(5)
     
-    # Top Info Grid
     pdf.set_font("Helvetica", '', 10)
     y_top = pdf.get_y()
     
-    # Date & BOL #
     pdf.set_font("Helvetica", 'B', 10)
     pdf.cell(30, 6, "Date:", 0, 0)
     pdf.set_font("Helvetica", '', 10)
@@ -435,10 +416,8 @@ def generate_bol_pdf(df, inv_number, inv_date, shipper_txt, consignee_txt, carri
     
     pdf.ln(5)
     
-    # Shipper & Consignee
     y_addr = pdf.get_y()
     
-    # Shipper
     pdf.set_xy(10, y_addr)
     pdf.set_font("Helvetica", 'B', 11)
     pdf.cell(90, 6, "SHIP FROM (SHIPPER)", 1, 1, 'L', fill=False)
@@ -446,7 +425,6 @@ def generate_bol_pdf(df, inv_number, inv_date, shipper_txt, consignee_txt, carri
     pdf.multi_cell(90, 5, shipper_txt, 1, 'L')
     y_ship_end = pdf.get_y()
     
-    # Consignee
     pdf.set_xy(110, y_addr)
     pdf.set_font("Helvetica", 'B', 11)
     pdf.cell(90, 6, "SHIP TO (CONSIGNEE)", 1, 1, 'L', fill=False)
@@ -457,13 +435,10 @@ def generate_bol_pdf(df, inv_number, inv_date, shipper_txt, consignee_txt, carri
     new_y = max(y_ship_end, y_con_end) + 5
     pdf.set_y(new_y)
     
-    # Carrier
     pdf.set_font("Helvetica", 'B', 11)
     pdf.cell(0, 6, f"CARRIER: {carrier_name}", 0, 1)
     pdf.ln(5)
     
-    # Handling Units Table
-    # Headers
     w = [30, 30, 80, 25, 25]
     headers = ["HM", "QTY", "DESCRIPTION OF COMMODITY", "WEIGHT", "CLASS"]
     
@@ -473,26 +448,21 @@ def generate_bol_pdf(df, inv_number, inv_date, shipper_txt, consignee_txt, carri
         pdf.cell(w[i], 8, h, 1, 0, 'C', fill=True)
     pdf.ln()
     
-    # Row 1: The Consolidated Shipment
     pdf.set_font("Helvetica", '', 9)
+    pdf.cell(w[0], 8, "", 1, 0, 'C') 
+    pdf.cell(w[1], 8, f"{pallets} PLT", 1, 0, 'C') 
+    pdf.cell(w[2], 8, "ROASTED COFFEE (NMFC 056820)", 1, 0, 'L') 
+    pdf.cell(w[3], 8, f"{total_weight_lbs:.1f} lbs", 1, 0, 'R') 
+    pdf.cell(w[4], 8, "60", 1, 1, 'C') 
     
-    # Handling Line
-    pdf.cell(w[0], 8, "", 1, 0, 'C') # HM
-    pdf.cell(w[1], 8, f"{pallets} PLT", 1, 0, 'C') # Qty
-    pdf.cell(w[2], 8, "ROASTED COFFEE (NMFC 056820)", 1, 0, 'L') # Desc
-    pdf.cell(w[3], 8, f"{total_weight_lbs:.1f} lbs", 1, 0, 'R') # Weight
-    pdf.cell(w[4], 8, "60", 1, 1, 'C') # Class
-    
-    # Detail Line (Cartons)
     pdf.cell(w[0], 8, "", 1, 0, 'C')
-    pdf.cell(w[1], 8, f"{cartons} CTN", 1, 0, 'C') # Cartons
+    pdf.cell(w[1], 8, f"{cartons} CTN", 1, 0, 'C') 
     pdf.cell(w[2], 8, "   (Contains roasted coffee in bags)", 1, 0, 'L')
     pdf.cell(w[3], 8, "", 1, 0, 'R')
     pdf.cell(w[4], 8, "", 1, 1, 'C')
     
     pdf.ln(10)
     
-    # Legal Text
     pdf.set_font("Helvetica", '', 8)
     legal = ("RECEIVED, subject to the classifications and tariffs in effect on the date of the issue of this Bill of Lading, "
              "the property described above in apparent good order, except as noted (contents and condition of contents of packages unknown), "
@@ -503,7 +473,6 @@ def generate_bol_pdf(df, inv_number, inv_date, shipper_txt, consignee_txt, carri
     
     pdf.ln(15)
     
-    # Signatures
     y_sig = pdf.get_y()
     pdf.line(10, y_sig, 90, y_sig)
     pdf.line(110, y_sig, 190, y_sig)
@@ -515,24 +484,13 @@ def generate_bol_pdf(df, inv_number, inv_date, shipper_txt, consignee_txt, carri
     pdf.set_xy(110, y_sig + 2)
     pdf.cell(80, 4, "CARRIER SIGNATURE / DATE", 0, 1)
     
-    # Add digital signature if exists
-    # (Optional logic here if user wants image on BOL too)
-    
     return bytes(pdf.output())
 
 # --- CUSTOMSCITY CSV GENERATOR ---
 def generate_customscity_csv(df, inv_number, inv_date, ship_to_txt, hbol_number):
-    """
-    Generates a CSV matching the CustomsCity template.
-    Uses 'ship_to_txt' for Consignee info.
-    Format Date: YYYYMMDD.
-    Carrier: FX.
-    Ref Number: Blank.
-    """
     lines = ship_to_txt.split('\n')
     c_name = lines[0].strip() if len(lines) > 0 else ""
     c_addr = lines[1].strip() if len(lines) > 1 else ""
-    
     c_city = ""
     c_state = ""
     c_zip = ""
@@ -541,8 +499,7 @@ def generate_customscity_csv(df, inv_number, inv_date, ship_to_txt, hbol_number)
     if len(lines) > 2:
         line3 = lines[2].strip()
         parts = line3.split(',')
-        if len(parts) >= 1:
-            c_city = parts[0].strip()
+        if len(parts) >= 1: c_city = parts[0].strip()
         if len(parts) >= 2:
             state_zip = parts[1].strip().split(' ')
             state_zip = [x for x in state_zip if x]
@@ -591,7 +548,6 @@ def generate_customscity_csv(df, inv_number, inv_date, ship_to_txt, hbol_number)
             'Voyage Trip Flight Number': hbol_number,
             'Rail Car Number': ''
         })
-        
     return pd.DataFrame(rows, columns=columns).to_csv(index=False).encode('utf-8')
 
 # ================= TAB 1: GENERATE DOCUMENTS =================
@@ -651,9 +607,12 @@ with tab_generate:
                 
                 if 'Discount' not in us_shipments.columns: us_shipments['Discount'] = "0%"
                 sales_data = us_shipments[['Variant code / SKU', 'Item variant', 'Quantity', 'Price per unit', 'Discount']].copy()
+                # Try to find Order Name column for counting cartons
+                order_col = next((col for col in ['Name', 'Order Name', 'Order Number'] if col in us_shipments.columns), None)
+                unique_orders_count = us_shipments[order_col].nunique() if order_col else 1
+                
                 sales_data['Variant code / SKU'] = sales_data['Variant code / SKU'].astype(str)
                 
-                # MERGE WITH CATALOG (INCL. WEIGHT)
                 catalog = get_catalog()
                 if not catalog.empty:
                     catalog['sku'] = catalog['sku'].astype(str)
@@ -662,7 +621,7 @@ with tab_generate:
                     merged['Final Desc'] = merged['description'].fillna(merged['product_name']).fillna(merged['Item variant'])
                     merged['Final HTS'] = merged['hts_code'].fillna(DEFAULT_HTS)
                     merged['Final FDA'] = merged['fda_code'].fillna(DEFAULT_FDA)
-                    merged['Final Weight'] = merged['weight_lbs'].fillna(0.0) # New: Weight
+                    merged['Final Weight'] = merged['weight_lbs'].fillna(0.0) 
                     processed = merged.copy()
                 else:
                     processed = sales_data.copy()
@@ -681,12 +640,11 @@ with tab_generate:
                 processed['Transfer Price (Unit)'] = processed['Original_Retail'] * (1 - app_discount_decimal)
                 processed['Transfer Total'] = processed['Quantity'] * processed['Transfer Price (Unit)']
                 
-                # --- CONSOLIDATE ---
                 consolidated = processed.groupby(['Variant code / SKU', 'Final Product Name', 'Final Desc']).agg({
                     'Quantity': 'sum',
                     'Final HTS': 'first',
                     'Final FDA': 'first',
-                    'Final Weight': 'first', # Weight per unit
+                    'Final Weight': 'first',
                     'Transfer Price (Unit)': 'mean',
                     'Transfer Total': 'sum'
                 }).reset_index()
@@ -712,7 +670,7 @@ with tab_generate:
                 
                 total_val = edited_df['Transfer Total'].sum()
                 
-                # --- LOGISTICS SECTION (For BOL) ---
+                # --- LOGISTICS SECTION ---
                 st.divider()
                 st.subheader("🚚 Shipping Logistics (For Bill of Lading)")
                 c_log1, c_log2, c_log3 = st.columns(3)
@@ -720,16 +678,14 @@ with tab_generate:
                 with c_log1:
                     pallets = st.number_input("Total Pallets", min_value=1, value=1, step=1)
                 with c_log2:
-                    cartons = st.number_input("Total Cartons/Boxes", min_value=1, value=int(edited_df['Quantity'].sum()), step=1)
+                    # UPDATED: Defaults to number of unique orders
+                    cartons = st.number_input("Total Cartons/Boxes", min_value=1, value=unique_orders_count, step=1)
                 with c_log3:
-                    # Calculate Total Weight
                     calc_weight = (edited_df['Quantity'] * edited_df['Weight (lbs)']).sum()
                     st.metric("Calculated Net Weight (lbs)", f"{calc_weight:,.2f}")
-                    # Allow override for Gross Weight (Pallet + Wrapping)
                     gross_weight = st.number_input("Total Gross Weight (lbs)", min_value=0.0, value=calc_weight + (pallets * 40), step=1.0)
 
                 # --- GENERATE FILES ---
-                # Generate unique tracking number once so it matches everywhere
                 unique_suffix = str(random.randint(10000000, 99999999))
                 hbol_number = f"HRUS{unique_suffix}"
                 
@@ -740,10 +696,9 @@ with tab_generate:
                 pdf_si = generate_pdf("SALES INVOICE", edited_df, inv_number, inv_date, 
                                       shipper_txt, importer_txt, consignee_txt, notes_txt, total_val, final_sig_bytes, signer_name)
                 
-                # BOL
                 pdf_bol = generate_bol_pdf(edited_df, inv_number, inv_date, shipper_txt, consignee_txt, "FX", hbol_number, pallets, cartons, gross_weight)
                 
-                # CSV (Pass hbol_number to keep it consistent)
+                # UPDATED: Pass consignee_txt instead of importer_txt for ship-to address logic
                 csv_customs = generate_customscity_csv(edited_df, inv_number, inv_date, consignee_txt, hbol_number)
 
                 st.session_state['current_pdfs'] = {
@@ -757,7 +712,6 @@ with tab_generate:
                 
                 with col_left:
                     st.subheader("🖨️ Downloads")
-                    # PDF Downloads
                     c_pdf1, c_pdf2, c_pdf3, c_pdf4 = st.columns(4)
                     with c_pdf1: st.download_button("📄 Commercial", pdf_ci, f"CI-{inv_number}.pdf", "application/pdf")
                     with c_pdf2: st.download_button("📄 Purch. Order", pdf_po, f"PO-{inv_number}.pdf", "application/pdf")
@@ -849,7 +803,6 @@ with tab_catalog:
 
     st.subheader("Edit Catalog")
     if not current_catalog.empty:
-        # Show weight column in editor
         edited_catalog = st.data_editor(current_catalog, num_rows="dynamic", 
                                         column_config={
                                             "weight_lbs": st.column_config.NumberColumn("Weight (lbs)", format="%.2f")
