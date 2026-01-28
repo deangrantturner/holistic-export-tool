@@ -607,11 +607,13 @@ with tab_generate:
                 
                 if 'Discount' not in us_shipments.columns: us_shipments['Discount'] = "0%"
                 sales_data = us_shipments[['Variant code / SKU', 'Item variant', 'Quantity', 'Price per unit', 'Discount']].copy()
-                # Try to find Order Name column for counting cartons
-                order_col = next((col for col in ['Name', 'Order Name', 'Order Number'] if col in us_shipments.columns), None)
-                unique_orders_count = us_shipments[order_col].nunique() if order_col else 1
-                
                 sales_data['Variant code / SKU'] = sales_data['Variant code / SKU'].astype(str)
+                
+                # COUNT UNIQUE ORDERS FOR CARTONS
+                # Look for 'SO #' first, then fallback to 'Name' or 'Order Number'
+                possible_order_cols = ['SO #', 'Name', 'Order Name', 'Order Number']
+                order_col = next((col for col in possible_order_cols if col in us_shipments.columns), None)
+                unique_orders_count = us_shipments[order_col].nunique() if order_col else 1
                 
                 catalog = get_catalog()
                 if not catalog.empty:
@@ -678,7 +680,7 @@ with tab_generate:
                 with c_log1:
                     pallets = st.number_input("Total Pallets", min_value=1, value=1, step=1)
                 with c_log2:
-                    # UPDATED: Defaults to number of unique orders
+                    # Defaults to unique Sales Orders count
                     cartons = st.number_input("Total Cartons/Boxes", min_value=1, value=unique_orders_count, step=1)
                 with c_log3:
                     calc_weight = (edited_df['Quantity'] * edited_df['Weight (lbs)']).sum()
@@ -698,7 +700,6 @@ with tab_generate:
                 
                 pdf_bol = generate_bol_pdf(edited_df, inv_number, inv_date, shipper_txt, consignee_txt, "FX", hbol_number, pallets, cartons, gross_weight)
                 
-                # UPDATED: Pass consignee_txt instead of importer_txt for ship-to address logic
                 csv_customs = generate_customscity_csv(edited_df, inv_number, inv_date, consignee_txt, hbol_number)
 
                 st.session_state['current_pdfs'] = {
