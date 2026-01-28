@@ -386,36 +386,44 @@ def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship,
 
     return bytes(pdf.output())
 
-# --- BOL GENERATOR ---
+# --- BOL GENERATOR (FIXED) ---
 def generate_bol_pdf(df, inv_number, inv_date, shipper_txt, consignee_txt, carrier_name, hbol_number, pallets, cartons, total_weight_lbs):
     pdf = FPDF()
     pdf.add_page()
     pdf.set_auto_page_break(auto=True, margin=15)
     
+    # Title
     pdf.set_font('Helvetica', 'B', 18)
     pdf.cell(0, 10, "STRAIGHT BILL OF LADING", 0, 1, 'C')
     pdf.ln(5)
     
+    # --- Top Info Grid (Fixed Layout) ---
     pdf.set_font("Helvetica", '', 10)
     y_top = pdf.get_y()
     
+    # LEFT Side
+    pdf.set_xy(10, y_top)
     pdf.set_font("Helvetica", 'B', 10)
-    pdf.cell(30, 6, "Date:", 0, 0)
+    pdf.cell(20, 6, "Date:", 0, 0)
     pdf.set_font("Helvetica", '', 10)
-    pdf.cell(60, 6, str(inv_date), 0, 0)
+    pdf.cell(40, 6, str(inv_date), 0, 0)
     
     pdf.set_font("Helvetica", 'B', 10)
-    pdf.cell(40, 6, "Bill of Lading #:", 0, 0, 'R')
+    pdf.cell(35, 6, "Customer Order #:", 0, 0)
     pdf.set_font("Helvetica", '', 10)
-    pdf.cell(60, 6, hbol_number, 0, 1, 'R')
+    pdf.cell(40, 6, inv_number, 0, 0) # Just cell to avoid line break
     
+    # RIGHT Side
+    # Move right column X start to 140 to give plenty of room
+    pdf.set_xy(140, y_top) 
     pdf.set_font("Helvetica", 'B', 10)
-    pdf.cell(30, 6, "Customer Order #:", 0, 0)
+    pdf.cell(30, 6, "BOL #:", 0, 0, 'R')
     pdf.set_font("Helvetica", '', 10)
-    pdf.cell(60, 6, inv_number, 0, 1)
+    pdf.cell(30, 6, hbol_number, 0, 1, 'R')
     
     pdf.ln(5)
     
+    # Addresses
     y_addr = pdf.get_y()
     
     pdf.set_xy(10, y_addr)
@@ -439,6 +447,7 @@ def generate_bol_pdf(df, inv_number, inv_date, shipper_txt, consignee_txt, carri
     pdf.cell(0, 6, f"CARRIER: {carrier_name}", 0, 1)
     pdf.ln(5)
     
+    # Table
     w = [30, 30, 80, 25, 25]
     headers = ["HM", "QTY", "DESCRIPTION OF COMMODITY", "WEIGHT", "CLASS"]
     
@@ -449,12 +458,14 @@ def generate_bol_pdf(df, inv_number, inv_date, shipper_txt, consignee_txt, carri
     pdf.ln()
     
     pdf.set_font("Helvetica", '', 9)
+    # Row 1
     pdf.cell(w[0], 8, "", 1, 0, 'C') 
     pdf.cell(w[1], 8, f"{pallets} PLT", 1, 0, 'C') 
     pdf.cell(w[2], 8, "ROASTED COFFEE (NMFC 056820)", 1, 0, 'L') 
     pdf.cell(w[3], 8, f"{total_weight_lbs:.1f} lbs", 1, 0, 'R') 
     pdf.cell(w[4], 8, "60", 1, 1, 'C') 
     
+    # Row 2 (Carton Detail)
     pdf.cell(w[0], 8, "", 1, 0, 'C')
     pdf.cell(w[1], 8, f"{cartons} CTN", 1, 0, 'C') 
     pdf.cell(w[2], 8, "   (Contains roasted coffee in bags)", 1, 0, 'L')
@@ -610,7 +621,6 @@ with tab_generate:
                 sales_data['Variant code / SKU'] = sales_data['Variant code / SKU'].astype(str)
                 
                 # COUNT UNIQUE ORDERS FOR CARTONS
-                # Look for 'SO #' first, then fallback to 'Name' or 'Order Number'
                 possible_order_cols = ['SO #', 'Name', 'Order Name', 'Order Number']
                 order_col = next((col for col in possible_order_cols if col in us_shipments.columns), None)
                 unique_orders_count = us_shipments[order_col].nunique() if order_col else 1
@@ -680,7 +690,6 @@ with tab_generate:
                 with c_log1:
                     pallets = st.number_input("Total Pallets", min_value=1, value=1, step=1)
                 with c_log2:
-                    # Defaults to unique Sales Orders count
                     cartons = st.number_input("Total Cartons/Boxes", min_value=1, value=unique_orders_count, step=1)
                 with c_log3:
                     calc_weight = (edited_df['Quantity'] * edited_df['Weight (lbs)']).sum()
