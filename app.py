@@ -400,41 +400,45 @@ def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship,
 
     return bytes(pdf.output())
 
-# --- CUSTOMSCITY CSV GENERATOR (UPDATED) ---
-def generate_customscity_csv(df, inv_number, inv_date, importer_txt):
+# --- CUSTOMSCITY CSV GENERATOR (FIXED) ---
+def generate_customscity_csv(df, inv_number, inv_date, ship_to_txt):
     """
-    Generates a CSV that matches the user's CustomsCity template.
-    Generates a random HRUSXXXXXXXX BOL number.
-    Parses Importer text for Consignee columns.
+    Generates a CSV matching the CustomsCity template.
+    Uses 'ship_to_txt' for Consignee info.
+    Format Date: YYYYMMDD.
+    Carrier: FX.
+    Ref Number: Blank.
     """
     # 1. Generate unique MBOL/HBOL
     unique_suffix = str(random.randint(10000000, 99999999))
     hbol_number = f"HRUS{unique_suffix}"
     
-    # 2. Parse Importer Text (Consignee)
+    # 2. Parse Ship To Text (Consignee)
     # Assumes format:
     # Name
     # Address
     # City, State Zip
     # Country
-    lines = importer_txt.split('\n')
+    lines = ship_to_txt.split('\n')
     c_name = lines[0].strip() if len(lines) > 0 else ""
     c_addr = lines[1].strip() if len(lines) > 1 else ""
     
     c_city = ""
     c_state = ""
     c_zip = ""
-    c_country = "US" # Default per instructions
+    c_country = "US" 
     
     if len(lines) > 2:
-        # Try to parse "Sheridan, WY 82801"
+        # Try to parse "Champlain, NY 12919"
         line3 = lines[2].strip()
         parts = line3.split(',')
         if len(parts) >= 1:
             c_city = parts[0].strip()
         if len(parts) >= 2:
-            # " WY 82801"
+            # " NY 12919"
             state_zip = parts[1].strip().split(' ')
+            # Filter empty strings from split
+            state_zip = [x for x in state_zip if x]
             if len(state_zip) >= 1: c_state = state_zip[0]
             if len(state_zip) >= 2: c_zip = state_zip[1]
 
@@ -454,12 +458,12 @@ def generate_customscity_csv(df, inv_number, inv_date, importer_txt):
         rows.append({
             'Entry Type': '01',
             'Reference Qualifier': 'BOL',
-            'Reference Number': inv_number, # Mapping Invoice # to Ref
+            'Reference Number': '', # BLANK per request
             'Mode of Transport': '30',
             'Bill Type': 'R',
             'MBOL/TRIP Number': hbol_number,
             'HBOL/ Shipment Control Number': hbol_number,
-            'Estimate Date of Arrival': str(inv_date),
+            'Estimate Date of Arrival': inv_date.strftime('%Y%m%d'), # YYYYMMDD
             'Time of Arrival': '18:00',
             'US Port of Arrival': '0712',
             'Equipment Number': '',
@@ -475,7 +479,7 @@ def generate_customscity_csv(df, inv_number, inv_date, importer_txt):
             'Consignee Country': c_country,
             'Description': row['Description'],
             'Product ID': row['Variant code / SKU'],
-            'Carrier Name': '',
+            'Carrier Name': 'FX', # FX per request
             'Vessel Name': '',
             'Voyage Trip Flight Number': hbol_number,
             'Rail Car Number': ''
@@ -601,8 +605,8 @@ with tab_generate:
                 pdf_si = generate_pdf("SALES INVOICE", edited_df, inv_number, inv_date, 
                                       shipper_txt, importer_txt, consignee_txt, notes_txt, total_val, final_sig_bytes, signer_name)
                 
-                # --- CUSTOMSCITY CSV ---
-                csv_customs = generate_customscity_csv(edited_df, inv_number, inv_date, importer_txt)
+                # Generate CustomsCity CSV using Ship-To (Consignee) address
+                csv_customs = generate_customscity_csv(edited_df, inv_number, inv_date, consignee_txt)
 
                 st.session_state['current_pdfs'] = {
                     'ci': pdf_ci, 'po': pdf_po, 'si': pdf_si, 
