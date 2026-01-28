@@ -13,6 +13,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.application import MIMEApplication
 import math
+import random
 
 # --- Database Setup (SQLite) ---
 def init_db():
@@ -43,7 +44,6 @@ def save_invoice_metadata(inv_num, total_val, buyer):
     try:
         conn = sqlite3.connect('invoices.db')
         c = conn.cursor()
-        
         c.execute("SELECT invoice_number FROM invoice_history_v3 WHERE invoice_number LIKE ?", (inv_num + '%',))
         existing_nums = [row[0] for row in c.fetchall()]
         
@@ -101,7 +101,6 @@ def clear_catalog():
     conn.commit()
     conn.close()
 
-# --- Settings & Signature Functions (FIXED) ---
 def save_setting(key, value_bytes):
     conn = sqlite3.connect('invoices.db')
     c = conn.cursor()
@@ -117,7 +116,6 @@ def get_setting(key):
     conn.close()
     return data[0] if data else None
 
-# Wrapper functions to maintain compatibility with existing calls
 def save_signature(image_bytes):
     save_setting('signature', image_bytes)
 
@@ -157,13 +155,12 @@ st.markdown("""
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700&family=Open+Sans:wght@400;600&display=swap');
 
-        /* Main App Background */
         .stApp {
             background-color: #FAFAFA;
             font-family: 'Open Sans', sans-serif;
         }
 
-        /* --- STICKY TABS FIX --- */
+        /* STICKY TABS */
         div[data-testid="stTabs"] > div:first-child {
             position: sticky !important;
             top: 0px !important;
@@ -175,14 +172,12 @@ st.markdown("""
             box-shadow: 0px 4px 6px rgba(0,0,0,0.05);
         }
 
-        /* Headers */
         h1, h2, h3 {
             font-family: 'Montserrat', sans-serif !important;
             color: #6F4E37 !important;
             font-weight: 700;
         }
 
-        /* Buttons (Primary) */
         div.stButton > button {
             background-color: #6F4E37 !important;
             color: white !important;
@@ -195,7 +190,6 @@ st.markdown("""
             background-color: #5A3E2B !important;
         }
 
-        /* Inputs */
         .stTextInput input, .stTextArea textarea, .stDateInput input, .stNumberInput input {
             border-radius: 8px !important;
             border: 1px solid #D0D0D0 !important;
@@ -246,12 +240,10 @@ def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship,
     pdf.add_page()
     pdf.set_auto_page_break(auto=False)
     
-    # --- HEADER ---
     pdf.set_font('Helvetica', 'B', 20)
     pdf.cell(0, 10, doc_type, 0, 1, 'C')
     pdf.ln(5)
 
-    # --- INFO BLOCKS ---
     pdf.set_font("Helvetica", '', 9)
     y_start = pdf.get_y()
     
@@ -315,7 +307,6 @@ def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship,
     
     pdf.set_y(y_mid + 35)
 
-    # --- TABLE HEADERS ---
     w = [12, 40, 45, 23, 23, 22, 25]
     headers = ["QTY", "PRODUCT", "DESCRIPTION", "HTS #", "FDA CODE", "UNIT ($)", "TOTAL ($)"]
     
@@ -325,7 +316,6 @@ def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship,
         pdf.cell(w[i], 8, h, 1, 0, 'C', fill=True)
     pdf.ln()
     
-    # --- DYNAMIC TABLE ROWS ---
     pdf.set_font("Helvetica", '', 7)
     line_h = 5
 
@@ -385,7 +375,6 @@ def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship,
     pdf.cell(sum(w[:-1]), 8, "TOTAL VALUE (USD):", 0, 0, 'R')
     pdf.cell(w[-1], 8, f"${total_val:,.2f}", 1, 1, 'R')
     
-    # --- SIGNATURE BLOCK ---
     pdf.ln(10)
     if pdf.get_y() > 250: pdf.add_page()
     
@@ -410,6 +399,89 @@ def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship,
     pdf.cell(0, 5, signer_name, 0, 1, 'L')
 
     return bytes(pdf.output())
+
+# --- CUSTOMSCITY CSV GENERATOR (UPDATED) ---
+def generate_customscity_csv(df, inv_number, inv_date, importer_txt):
+    """
+    Generates a CSV that matches the user's CustomsCity template.
+    Generates a random HRUSXXXXXXXX BOL number.
+    Parses Importer text for Consignee columns.
+    """
+    # 1. Generate unique MBOL/HBOL
+    unique_suffix = str(random.randint(10000000, 99999999))
+    hbol_number = f"HRUS{unique_suffix}"
+    
+    # 2. Parse Importer Text (Consignee)
+    # Assumes format:
+    # Name
+    # Address
+    # City, State Zip
+    # Country
+    lines = importer_txt.split('\n')
+    c_name = lines[0].strip() if len(lines) > 0 else ""
+    c_addr = lines[1].strip() if len(lines) > 1 else ""
+    
+    c_city = ""
+    c_state = ""
+    c_zip = ""
+    c_country = "US" # Default per instructions
+    
+    if len(lines) > 2:
+        # Try to parse "Sheridan, WY 82801"
+        line3 = lines[2].strip()
+        parts = line3.split(',')
+        if len(parts) >= 1:
+            c_city = parts[0].strip()
+        if len(parts) >= 2:
+            # " WY 82801"
+            state_zip = parts[1].strip().split(' ')
+            if len(state_zip) >= 1: c_state = state_zip[0]
+            if len(state_zip) >= 2: c_zip = state_zip[1]
+
+    columns = [
+        'Entry Type', 'Reference Qualifier', 'Reference Number', 'Mode of Transport', 
+        'Bill Type', 'MBOL/TRIP Number', 'HBOL/ Shipment Control Number', 
+        'Estimate Date of Arrival', 'Time of Arrival', 'US Port of Arrival', 
+        'Equipment Number', 'Shipper Name', 'Shipper Address', 'Shipper City', 
+        'Shipper Country', 'Consignee Name', 'Consignee Address', 'Consignee City', 
+        'Consignee State or Province', 'Consignee Postal Code', 'Consignee Country', 
+        'Description', 'Product ID', 'Carrier Name', 'Vessel Name', 
+        'Voyage Trip Flight Number', 'Rail Car Number'
+    ]
+    
+    rows = []
+    for _, row in df.iterrows():
+        rows.append({
+            'Entry Type': '01',
+            'Reference Qualifier': 'BOL',
+            'Reference Number': inv_number, # Mapping Invoice # to Ref
+            'Mode of Transport': '30',
+            'Bill Type': 'R',
+            'MBOL/TRIP Number': hbol_number,
+            'HBOL/ Shipment Control Number': hbol_number,
+            'Estimate Date of Arrival': str(inv_date),
+            'Time of Arrival': '18:00',
+            'US Port of Arrival': '0712',
+            'Equipment Number': '',
+            'Shipper Name': 'HOLISTIC ROASTERS',
+            'Shipper Address': '3780 RUE SAINT-PATRICK',
+            'Shipper City': 'MONTREAL',
+            'Shipper Country': 'CA',
+            'Consignee Name': c_name,
+            'Consignee Address': c_addr,
+            'Consignee City': c_city,
+            'Consignee State or Province': c_state,
+            'Consignee Postal Code': c_zip,
+            'Consignee Country': c_country,
+            'Description': row['Description'],
+            'Product ID': row['Variant code / SKU'],
+            'Carrier Name': '',
+            'Vessel Name': '',
+            'Voyage Trip Flight Number': hbol_number,
+            'Rail Car Number': ''
+        })
+        
+    return pd.DataFrame(rows, columns=columns).to_csv(index=False).encode('utf-8')
 
 # ================= TAB 1: GENERATE DOCUMENTS =================
 with tab_generate:
@@ -521,7 +593,7 @@ with tab_generate:
                 )
                 total_val = edited_df['Transfer Total'].sum()
                 
-                # --- GENERATE PDFS ---
+                # --- GENERATE FILES ---
                 pdf_ci = generate_pdf("COMMERCIAL INVOICE", edited_df, inv_number, inv_date, 
                                       shipper_txt, importer_txt, consignee_txt, notes_txt, total_val, final_sig_bytes, signer_name)
                 pdf_po = generate_pdf("PURCHASE ORDER", edited_df, inv_number, inv_date, 
@@ -529,6 +601,9 @@ with tab_generate:
                 pdf_si = generate_pdf("SALES INVOICE", edited_df, inv_number, inv_date, 
                                       shipper_txt, importer_txt, consignee_txt, notes_txt, total_val, final_sig_bytes, signer_name)
                 
+                # --- CUSTOMSCITY CSV ---
+                csv_customs = generate_customscity_csv(edited_df, inv_number, inv_date, importer_txt)
+
                 st.session_state['current_pdfs'] = {
                     'ci': pdf_ci, 'po': pdf_po, 'si': pdf_si, 
                     'inv_num': inv_number, 'total': total_val, 'buyer': importer_txt.split('\n')[0]
@@ -540,20 +615,30 @@ with tab_generate:
                 
                 with col_left:
                     st.subheader("🖨️ Downloads")
-                    st.download_button("📄 Download Commercial Invoice", pdf_ci, f"CI-{inv_number}.pdf", "application/pdf")
-                    st.download_button("📄 Download Purchase Order", pdf_po, f"PO-{inv_number}.pdf", "application/pdf")
-                    st.download_button("📄 Download Sales Invoice", pdf_si, f"SI-{inv_number}.pdf", "application/pdf")
+                    # PDF Downloads
+                    c_pdf1, c_pdf2, c_pdf3 = st.columns(3)
+                    with c_pdf1: st.download_button("📄 Commercial Inv.", pdf_ci, f"CI-{inv_number}.pdf", "application/pdf")
+                    with c_pdf2: st.download_button("📄 Purchase Order", pdf_po, f"PO-{inv_number}.pdf", "application/pdf")
+                    with c_pdf3: st.download_button("📄 Sales Invoice", pdf_si, f"SI-{inv_number}.pdf", "application/pdf")
+                    
+                    st.divider()
+                    # Custom City CSV
+                    st.download_button(
+                        label="📥 Download CustomsCity CSV",
+                        data=csv_customs,
+                        file_name=f"CustomsCity_Upload_{inv_number}.csv",
+                        mime="text/csv",
+                        type="primary"
+                    )
                 
                 with col_right:
                     st.subheader("📧 Email Center")
                     with st.expander("⚙️ Sender Settings (Required)", expanded=False):
                         st.info("You need an 'App Password' for Gmail. Normal passwords won't work.")
                         
-                        # Load Settings from DB
                         db_email = get_setting('smtp_email')
                         db_pass = get_setting('smtp_pass')
                         
-                        # Decode if bytes
                         default_email = db_email.decode('utf-8') if db_email else "dean.turner@holisticroasters.com"
                         default_pass = db_pass.decode('utf-8') if db_pass else ""
                         
@@ -577,12 +662,13 @@ with tab_generate:
                             files_to_send = [
                                 {'name': f"CI-{new_ver}.pdf", 'data': pdf_ci},
                                 {'name': f"PO-{new_ver}.pdf", 'data': pdf_po},
-                                {'name': f"SI-{new_ver}.pdf", 'data': pdf_si}
+                                {'name': f"SI-{new_ver}.pdf", 'data': pdf_si},
+                                {'name': f"CustomsCity_Upload_{new_ver}.csv", 'data': csv_customs}
                             ]
                             
                             success, msg = send_email_with_attachments(sender_email, sender_pass, recipient_email, 
                                                                        f"Export Docs: {new_ver}", 
-                                                                       f"Attached are the export documents for {new_ver}.", 
+                                                                       f"Attached are the export documents and CustomsCity CSV for {new_ver}.", 
                                                                        files_to_send)
                             if success:
                                 st.success(f"✅ Sent to {recipient_email}")
