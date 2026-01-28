@@ -226,10 +226,12 @@ def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship,
     pdf.add_page()
     pdf.set_auto_page_break(auto=False)
     
+    # --- HEADER ---
     pdf.set_font('Helvetica', 'B', 20)
     pdf.cell(0, 10, doc_type, 0, 1, 'C')
     pdf.ln(5)
 
+    # --- INFO BLOCKS ---
     pdf.set_font("Helvetica", '', 9)
     y_start = pdf.get_y()
     
@@ -293,6 +295,7 @@ def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship,
     
     pdf.set_y(y_mid + 35)
 
+    # --- TABLE HEADERS ---
     w = [12, 40, 45, 23, 23, 22, 25]
     headers = ["QTY", "PRODUCT", "DESCRIPTION", "HTS #", "FDA CODE", "UNIT ($)", "TOTAL ($)"]
     
@@ -302,6 +305,7 @@ def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship,
         pdf.cell(w[i], 8, h, 1, 0, 'C', fill=True)
     pdf.ln()
     
+    # --- DYNAMIC TABLE ROWS ---
     pdf.set_font("Helvetica", '', 7)
     line_h = 5
 
@@ -319,6 +323,7 @@ def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship,
             (hts, 'C'), (fda, 'C'), (price, 'R'), (tot, 'R')
         ]
         
+        # Calculate Max Row Height
         max_lines = 1
         for i, (txt, align) in enumerate(data_row):
             col_w = w[i]
@@ -361,6 +366,7 @@ def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship,
     pdf.cell(sum(w[:-1]), 8, "TOTAL VALUE (USD):", 0, 0, 'R')
     pdf.cell(w[-1], 8, f"${total_val:,.2f}", 1, 1, 'R')
     
+    # --- SIGNATURE BLOCK ---
     pdf.ln(10)
     if pdf.get_y() > 250: pdf.add_page()
     
@@ -390,14 +396,14 @@ def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship,
 def generate_bol_pdf(df, inv_number, inv_date, shipper_txt, consignee_txt, carrier_name, hbol_number, pallets, cartons, total_weight_lbs, sig_bytes=None):
     pdf = FPDF()
     pdf.add_page()
-    pdf.set_auto_page_break(auto=False) # We handle height manually
+    pdf.set_auto_page_break(auto=False) # Handle page breaks manually
     
     # Title
     pdf.set_font('Helvetica', 'B', 18)
     pdf.cell(0, 10, "STRAIGHT BILL OF LADING", 0, 1, 'C')
     pdf.ln(5)
     
-    # --- Top Info Grid (Fixed Layout) ---
+    # --- Top Info Grid ---
     pdf.set_font("Helvetica", '', 10)
     y_top = pdf.get_y()
     
@@ -413,7 +419,7 @@ def generate_bol_pdf(df, inv_number, inv_date, shipper_txt, consignee_txt, carri
     pdf.set_font("Helvetica", '', 10)
     pdf.cell(40, 6, inv_number, 0, 0)
     
-    # RIGHT Side (Push far right to avoid collision)
+    # RIGHT Side
     pdf.set_xy(130, y_top) 
     pdf.set_font("Helvetica", 'B', 10)
     pdf.cell(30, 6, "BOL #:", 0, 0, 'R')
@@ -422,16 +428,19 @@ def generate_bol_pdf(df, inv_number, inv_date, shipper_txt, consignee_txt, carri
     
     pdf.ln(10)
     
-    # Addresses
+    # Addresses (Using Multi-Cell height calc)
     y_addr = pdf.get_y()
     
+    # Shipper
     pdf.set_xy(10, y_addr)
     pdf.set_font("Helvetica", 'B', 11)
     pdf.cell(90, 6, "SHIP FROM (SHIPPER)", 1, 1, 'L', fill=False)
     pdf.set_font("Helvetica", '', 9)
+    # Estimate height needed for text
     pdf.multi_cell(90, 5, shipper_txt, 1, 'L')
     y_ship_end = pdf.get_y()
     
+    # Consignee
     pdf.set_xy(110, y_addr)
     pdf.set_font("Helvetica", 'B', 11)
     pdf.cell(90, 6, "SHIP TO (CONSIGNEE)", 1, 1, 'L', fill=False)
@@ -447,7 +456,6 @@ def generate_bol_pdf(df, inv_number, inv_date, shipper_txt, consignee_txt, carri
     pdf.ln(5)
     
     # --- HANDLING UNITS TABLE (GRID SYSTEM) ---
-    # Widths: HM, Qty, Desc, Weight, Class
     w = [15, 25, 100, 30, 20] 
     headers = ["HM", "QTY", "DESCRIPTION OF COMMODITY", "WEIGHT", "CLASS"]
     
@@ -457,12 +465,14 @@ def generate_bol_pdf(df, inv_number, inv_date, shipper_txt, consignee_txt, carri
         pdf.cell(w[i], 8, h, 1, 0, 'C', fill=True)
     pdf.ln()
     
-    # Helper for grid row
+    # --- HELPER FUNCTION FOR GRID ROW ---
+    # This logic matches the Commercial Invoice generator
     def print_grid_row(data_list):
-        # Calculate max height
         pdf.set_font("Helvetica", '', 9)
         line_h = 5
         max_lines = 1
+        
+        # 1. Measure all cells
         for i, (txt, align) in enumerate(data_list):
             col_w = w[i]
             txt_w = pdf.get_string_width(txt)
@@ -475,13 +485,13 @@ def generate_bol_pdf(df, inv_number, inv_date, shipper_txt, consignee_txt, carri
         y_start = pdf.get_y()
         x_start = 10
         
-        # Print Cells
+        # 2. Print Content
         for i, (txt, align) in enumerate(data_list):
             current_x = x_start + sum(w[:i])
             pdf.set_xy(current_x, y_start)
             pdf.multi_cell(w[i], line_h, txt, 0, align)
             
-        # Draw Borders
+        # 3. Draw Borders
         pdf.set_xy(x_start, y_start)
         for i in range(len(w)):
             current_x = x_start + sum(w[:i])
@@ -537,18 +547,17 @@ def generate_bol_pdf(df, inv_number, inv_date, shipper_txt, consignee_txt, carri
     pdf.set_xy(110, y_sig + 2)
     pdf.cell(80, 4, "CARRIER SIGNATURE / DATE", 0, 1)
     
-    # ADD SIGNATURE IMAGE
+    # ADD SIGNATURE IMAGE (SHIPPER SIDE)
     if sig_bytes:
-        # Save temp file
         with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp:
             tmp.write(sig_bytes)
             tmp_path = tmp.name
         try:
-            # Place image slightly above the line
-            # y_sig is the line y. We go up ~15 units.
+            # Place image above the Shipper line
+            # y_sig is the line level. We go up ~15 units.
             pdf.image(tmp_path, x=15, y=y_sig-15, w=35) 
         except:
-            pass # Fail silently if image bad
+            pass # Fail silently
         os.unlink(tmp_path)
     
     return bytes(pdf.output())
@@ -746,7 +755,6 @@ with tab_generate:
                 with c_log1:
                     pallets = st.number_input("Total Pallets", min_value=1, value=1, step=1)
                 with c_log2:
-                    # Defaults to unique Sales Orders count
                     cartons = st.number_input("Total Cartons/Boxes", min_value=1, value=unique_orders_count, step=1)
                 with c_log3:
                     calc_weight = (edited_df['Quantity'] * edited_df['Weight (lbs)']).sum()
@@ -764,7 +772,6 @@ with tab_generate:
                 pdf_si = generate_pdf("SALES INVOICE", edited_df, inv_number, inv_date, 
                                       shipper_txt, importer_txt, consignee_txt, notes_txt, total_val, final_sig_bytes, signer_name)
                 
-                # Pass signature to BOL generator
                 pdf_bol = generate_bol_pdf(edited_df, inv_number, inv_date, shipper_txt, consignee_txt, "FX", hbol_number, pallets, cartons, gross_weight, final_sig_bytes)
                 
                 csv_customs = generate_customscity_csv(edited_df, inv_number, inv_date, consignee_txt, hbol_number)
