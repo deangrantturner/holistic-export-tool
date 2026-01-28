@@ -26,12 +26,19 @@ def init_db():
                   total_value REAL,
                   buyer_name TEXT)''')
     
+    # Create Catalog Table
     c.execute('''CREATE TABLE IF NOT EXISTS product_catalog_v3
                  (sku TEXT PRIMARY KEY,
                   product_name TEXT,
                   description TEXT,
                   hts_code TEXT,
                   fda_code TEXT)''')
+    
+    # MIGRATION: Add 'weight_lbs' column if it doesn't exist
+    try:
+        c.execute("ALTER TABLE product_catalog_v3 ADD COLUMN weight_lbs REAL")
+    except:
+        pass # Column likely already exists
                   
     c.execute('''CREATE TABLE IF NOT EXISTS settings
                  (key TEXT PRIMARY KEY,
@@ -85,12 +92,21 @@ def upsert_catalog_from_df(df):
     for _, row in df.iterrows():
         p_name = row.get('product_name', '')
         desc = row.get('description', '')
+        weight = row.get('weight_lbs', 0.0)
+        
+        # Handle potential empty/NaN weight
+        try:
+            weight = float(weight)
+        except:
+            weight = 0.0
+
         if pd.isna(desc) or desc == "":
             desc = p_name
+            
         c.execute("""INSERT OR REPLACE INTO product_catalog_v3 
-                     (sku, product_name, description, hts_code, fda_code) 
-                     VALUES (?, ?, ?, ?, ?)""",
-                  (str(row['sku']), p_name, desc, str(row['hts_code']), str(row['fda_code'])))
+                     (sku, product_name, description, hts_code, fda_code, weight_lbs) 
+                     VALUES (?, ?, ?, ?, ?, ?)""",
+                  (str(row['sku']), p_name, desc, str(row['hts_code']), str(row['fda_code']), weight))
     conn.commit()
     conn.close()
 
@@ -155,11 +171,8 @@ st.markdown("""
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700&family=Open+Sans:wght@400;600&display=swap');
 
-        .stApp {
-            background-color: #FAFAFA;
-            font-family: 'Open Sans', sans-serif;
-        }
-
+        .stApp { background-color: #FAFAFA; font-family: 'Open Sans', sans-serif; }
+        
         /* STICKY TABS */
         div[data-testid="stTabs"] > div:first-child {
             position: sticky !important;
@@ -172,31 +185,17 @@ st.markdown("""
             box-shadow: 0px 4px 6px rgba(0,0,0,0.05);
         }
 
-        h1, h2, h3 {
-            font-family: 'Montserrat', sans-serif !important;
-            color: #6F4E37 !important;
-            font-weight: 700;
-        }
-
+        h1, h2, h3 { font-family: 'Montserrat', sans-serif !important; color: #6F4E37 !important; font-weight: 700; }
         div.stButton > button {
-            background-color: #6F4E37 !important;
-            color: white !important;
-            border-radius: 8px !important;
-            border: none !important;
-            font-family: 'Montserrat', sans-serif !important;
-            font-weight: 600 !important;
+            background-color: #6F4E37 !important; color: white !important; border-radius: 8px !important;
+            border: none !important; font-family: 'Montserrat', sans-serif !important; font-weight: 600 !important;
         }
-        div.stButton > button:hover {
-            background-color: #5A3E2B !important;
-        }
-
+        div.stButton > button:hover { background-color: #5A3E2B !important; }
         .stTextInput input, .stTextArea textarea, .stDateInput input, .stNumberInput input {
-            border-radius: 8px !important;
-            border: 1px solid #D0D0D0 !important;
+            border-radius: 8px !important; border: 1px solid #D0D0D0 !important;
         }
         .stTextInput input:focus, .stTextArea textarea:focus {
-            border-color: #6F4E37 !important;
-            box-shadow: 0 0 0 1px #6F4E37 !important;
+            border-color: #6F4E37 !important; box-shadow: 0 0 0 1px #6F4E37 !important;
         }
     </style>
 """, unsafe_allow_html=True)
@@ -229,6 +228,7 @@ HOLISTIC ROASTERS inc. Canada FDA #: 11638755492
 DEFAULT_HTS = "0901.21.00.20"
 DEFAULT_FDA = "31ADT01"
 
+# --- PDF GENERATOR CLASS ---
 class ProInvoice(FPDF):
     def header(self):
         pass
@@ -240,14 +240,16 @@ def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship,
     pdf.add_page()
     pdf.set_auto_page_break(auto=False)
     
+    # Header
     pdf.set_font('Helvetica', 'B', 20)
     pdf.cell(0, 10, doc_type, 0, 1, 'C')
     pdf.ln(5)
 
+    # Info Blocks
     pdf.set_font("Helvetica", '', 9)
     y_start = pdf.get_y()
     
-    # Column 1
+    # Col 1
     pdf.set_xy(10, y_start)
     pdf.set_font("Helvetica", 'B', 10)
     lbl_from = "SHIPPER / EXPORTER:" if "COMMERCIAL" in doc_type else "FROM (SELLER):"
@@ -258,7 +260,7 @@ def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship,
     pdf.multi_cell(70, 4, addr_from)
     y_end_1 = pdf.get_y()
 
-    # Column 2
+    # Col 2
     pdf.set_xy(90, y_start) 
     pdf.set_font("Helvetica", 'B', 10)
     lbl_to = "CONSIGNEE (SHIP TO):" if "COMMERCIAL" in doc_type else "SHIP TO:"
@@ -268,7 +270,7 @@ def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship,
     pdf.multi_cell(70, 4, addr_ship)
     y_end_2 = pdf.get_y()
 
-    # Column 3
+    # Col 3
     x_right = 160
     pdf.set_xy(x_right, y_start)
     pdf.set_font("Helvetica", 'B', 12)
@@ -400,8 +402,126 @@ def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship,
 
     return bytes(pdf.output())
 
-# --- CUSTOMSCITY CSV GENERATOR (FIXED) ---
-def generate_customscity_csv(df, inv_number, inv_date, ship_to_txt):
+# --- NEW: BOL GENERATOR ---
+def generate_bol_pdf(df, inv_number, inv_date, shipper_txt, consignee_txt, carrier_name, hbol_number, pallets, cartons, total_weight_lbs):
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_auto_page_break(auto=True, margin=15)
+    
+    # Title
+    pdf.set_font('Helvetica', 'B', 18)
+    pdf.cell(0, 10, "STRAIGHT BILL OF LADING", 0, 1, 'C')
+    pdf.ln(5)
+    
+    # Top Info Grid
+    pdf.set_font("Helvetica", '', 10)
+    y_top = pdf.get_y()
+    
+    # Date & BOL #
+    pdf.set_font("Helvetica", 'B', 10)
+    pdf.cell(30, 6, "Date:", 0, 0)
+    pdf.set_font("Helvetica", '', 10)
+    pdf.cell(60, 6, str(inv_date), 0, 0)
+    
+    pdf.set_font("Helvetica", 'B', 10)
+    pdf.cell(40, 6, "Bill of Lading #:", 0, 0, 'R')
+    pdf.set_font("Helvetica", '', 10)
+    pdf.cell(60, 6, hbol_number, 0, 1, 'R')
+    
+    pdf.set_font("Helvetica", 'B', 10)
+    pdf.cell(30, 6, "Customer Order #:", 0, 0)
+    pdf.set_font("Helvetica", '', 10)
+    pdf.cell(60, 6, inv_number, 0, 1)
+    
+    pdf.ln(5)
+    
+    # Shipper & Consignee
+    y_addr = pdf.get_y()
+    
+    # Shipper
+    pdf.set_xy(10, y_addr)
+    pdf.set_font("Helvetica", 'B', 11)
+    pdf.cell(90, 6, "SHIP FROM (SHIPPER)", 1, 1, 'L', fill=False)
+    pdf.set_font("Helvetica", '', 9)
+    pdf.multi_cell(90, 5, shipper_txt, 1, 'L')
+    y_ship_end = pdf.get_y()
+    
+    # Consignee
+    pdf.set_xy(110, y_addr)
+    pdf.set_font("Helvetica", 'B', 11)
+    pdf.cell(90, 6, "SHIP TO (CONSIGNEE)", 1, 1, 'L', fill=False)
+    pdf.set_font("Helvetica", '', 9)
+    pdf.multi_cell(90, 5, consignee_txt, 1, 'L')
+    y_con_end = pdf.get_y()
+    
+    new_y = max(y_ship_end, y_con_end) + 5
+    pdf.set_y(new_y)
+    
+    # Carrier
+    pdf.set_font("Helvetica", 'B', 11)
+    pdf.cell(0, 6, f"CARRIER: {carrier_name}", 0, 1)
+    pdf.ln(5)
+    
+    # Handling Units Table
+    # Headers
+    w = [30, 30, 80, 25, 25]
+    headers = ["HM", "QTY", "DESCRIPTION OF COMMODITY", "WEIGHT", "CLASS"]
+    
+    pdf.set_font("Helvetica", 'B', 9)
+    pdf.set_fill_color(220, 220, 220)
+    for i, h in enumerate(headers):
+        pdf.cell(w[i], 8, h, 1, 0, 'C', fill=True)
+    pdf.ln()
+    
+    # Row 1: The Consolidated Shipment
+    pdf.set_font("Helvetica", '', 9)
+    
+    # Handling Line
+    pdf.cell(w[0], 8, "", 1, 0, 'C') # HM
+    pdf.cell(w[1], 8, f"{pallets} PLT", 1, 0, 'C') # Qty
+    pdf.cell(w[2], 8, "ROASTED COFFEE (NMFC 056820)", 1, 0, 'L') # Desc
+    pdf.cell(w[3], 8, f"{total_weight_lbs:.1f} lbs", 1, 0, 'R') # Weight
+    pdf.cell(w[4], 8, "60", 1, 1, 'C') # Class
+    
+    # Detail Line (Cartons)
+    pdf.cell(w[0], 8, "", 1, 0, 'C')
+    pdf.cell(w[1], 8, f"{cartons} CTN", 1, 0, 'C') # Cartons
+    pdf.cell(w[2], 8, "   (Contains roasted coffee in bags)", 1, 0, 'L')
+    pdf.cell(w[3], 8, "", 1, 0, 'R')
+    pdf.cell(w[4], 8, "", 1, 1, 'C')
+    
+    pdf.ln(10)
+    
+    # Legal Text
+    pdf.set_font("Helvetica", '', 8)
+    legal = ("RECEIVED, subject to the classifications and tariffs in effect on the date of the issue of this Bill of Lading, "
+             "the property described above in apparent good order, except as noted (contents and condition of contents of packages unknown), "
+             "marked, consigned, and destined as indicated above which said carrier (the word carrier being understood throughout this contract "
+             "as meaning any person or corporation in possession of the property under the contract) agrees to carry to its usual place of delivery "
+             "at said destination.")
+    pdf.multi_cell(0, 4, legal)
+    
+    pdf.ln(15)
+    
+    # Signatures
+    y_sig = pdf.get_y()
+    pdf.line(10, y_sig, 90, y_sig)
+    pdf.line(110, y_sig, 190, y_sig)
+    
+    pdf.set_font("Helvetica", 'B', 8)
+    pdf.set_xy(10, y_sig + 2)
+    pdf.cell(80, 4, "SHIPPER SIGNATURE / DATE", 0, 0)
+    
+    pdf.set_xy(110, y_sig + 2)
+    pdf.cell(80, 4, "CARRIER SIGNATURE / DATE", 0, 1)
+    
+    # Add digital signature if exists
+    # (Optional logic here if user wants image on BOL too)
+    
+    return bytes(pdf.output())
+
+# --- CUSTOMSCITY CSV GENERATOR ---
+def generate_customscity_csv(df, inv_number, inv_date, ship_to_txt, hbol_number):
     """
     Generates a CSV matching the CustomsCity template.
     Uses 'ship_to_txt' for Consignee info.
@@ -409,16 +529,6 @@ def generate_customscity_csv(df, inv_number, inv_date, ship_to_txt):
     Carrier: FX.
     Ref Number: Blank.
     """
-    # 1. Generate unique MBOL/HBOL
-    unique_suffix = str(random.randint(10000000, 99999999))
-    hbol_number = f"HRUS{unique_suffix}"
-    
-    # 2. Parse Ship To Text (Consignee)
-    # Assumes format:
-    # Name
-    # Address
-    # City, State Zip
-    # Country
     lines = ship_to_txt.split('\n')
     c_name = lines[0].strip() if len(lines) > 0 else ""
     c_addr = lines[1].strip() if len(lines) > 1 else ""
@@ -429,15 +539,12 @@ def generate_customscity_csv(df, inv_number, inv_date, ship_to_txt):
     c_country = "US" 
     
     if len(lines) > 2:
-        # Try to parse "Champlain, NY 12919"
         line3 = lines[2].strip()
         parts = line3.split(',')
         if len(parts) >= 1:
             c_city = parts[0].strip()
         if len(parts) >= 2:
-            # " NY 12919"
             state_zip = parts[1].strip().split(' ')
-            # Filter empty strings from split
             state_zip = [x for x in state_zip if x]
             if len(state_zip) >= 1: c_state = state_zip[0]
             if len(state_zip) >= 2: c_zip = state_zip[1]
@@ -458,12 +565,12 @@ def generate_customscity_csv(df, inv_number, inv_date, ship_to_txt):
         rows.append({
             'Entry Type': '01',
             'Reference Qualifier': 'BOL',
-            'Reference Number': '', # BLANK per request
+            'Reference Number': '', 
             'Mode of Transport': '30',
             'Bill Type': 'R',
             'MBOL/TRIP Number': hbol_number,
             'HBOL/ Shipment Control Number': hbol_number,
-            'Estimate Date of Arrival': inv_date.strftime('%Y%m%d'), # YYYYMMDD
+            'Estimate Date of Arrival': inv_date.strftime('%Y%m%d'),
             'Time of Arrival': '18:00',
             'US Port of Arrival': '0712',
             'Equipment Number': '',
@@ -479,7 +586,7 @@ def generate_customscity_csv(df, inv_number, inv_date, ship_to_txt):
             'Consignee Country': c_country,
             'Description': row['Description'],
             'Product ID': row['Variant code / SKU'],
-            'Carrier Name': 'FX', # FX per request
+            'Carrier Name': 'FX',
             'Vessel Name': '',
             'Voyage Trip Flight Number': hbol_number,
             'Rail Car Number': ''
@@ -546,6 +653,7 @@ with tab_generate:
                 sales_data = us_shipments[['Variant code / SKU', 'Item variant', 'Quantity', 'Price per unit', 'Discount']].copy()
                 sales_data['Variant code / SKU'] = sales_data['Variant code / SKU'].astype(str)
                 
+                # MERGE WITH CATALOG (INCL. WEIGHT)
                 catalog = get_catalog()
                 if not catalog.empty:
                     catalog['sku'] = catalog['sku'].astype(str)
@@ -554,6 +662,7 @@ with tab_generate:
                     merged['Final Desc'] = merged['description'].fillna(merged['product_name']).fillna(merged['Item variant'])
                     merged['Final HTS'] = merged['hts_code'].fillna(DEFAULT_HTS)
                     merged['Final FDA'] = merged['fda_code'].fillna(DEFAULT_FDA)
+                    merged['Final Weight'] = merged['weight_lbs'].fillna(0.0) # New: Weight
                     processed = merged.copy()
                 else:
                     processed = sales_data.copy()
@@ -561,6 +670,7 @@ with tab_generate:
                     processed['Final Desc'] = processed['Item variant']
                     processed['Final HTS'] = DEFAULT_HTS
                     processed['Final FDA'] = DEFAULT_FDA
+                    processed['Final Weight'] = 0.0
                 
                 processed['Discount_Float'] = processed['Discount'].astype(str).str.replace('%', '', regex=False)
                 processed['Discount_Float'] = pd.to_numeric(processed['Discount_Float'], errors='coerce').fillna(0) / 100.0
@@ -571,10 +681,12 @@ with tab_generate:
                 processed['Transfer Price (Unit)'] = processed['Original_Retail'] * (1 - app_discount_decimal)
                 processed['Transfer Total'] = processed['Quantity'] * processed['Transfer Price (Unit)']
                 
+                # --- CONSOLIDATE ---
                 consolidated = processed.groupby(['Variant code / SKU', 'Final Product Name', 'Final Desc']).agg({
                     'Quantity': 'sum',
                     'Final HTS': 'first',
                     'Final FDA': 'first',
+                    'Final Weight': 'first', # Weight per unit
                     'Transfer Price (Unit)': 'mean',
                     'Transfer Total': 'sum'
                 }).reset_index()
@@ -583,7 +695,8 @@ with tab_generate:
                     'Final Product Name': 'Product Name',
                     'Final Desc': 'Description', 
                     'Final HTS': 'HTS Code', 
-                    'Final FDA': 'FDA Code'
+                    'Final FDA': 'FDA Code',
+                    'Final Weight': 'Weight (lbs)'
                 }, inplace=True)
                 
                 st.info("👇 Review Line Items")
@@ -591,13 +704,35 @@ with tab_generate:
                     consolidated,
                     column_config={
                         "Transfer Total": st.column_config.NumberColumn("Total $", format="$%.2f"),
-                        "Transfer Price (Unit)": st.column_config.NumberColumn("Transfer Price", format="$%.2f")
+                        "Transfer Price (Unit)": st.column_config.NumberColumn("Transfer Price", format="$%.2f"),
+                        "Weight (lbs)": st.column_config.NumberColumn("Unit Weight (lbs)", format="%.2f")
                     },
                     num_rows="dynamic"
                 )
+                
                 total_val = edited_df['Transfer Total'].sum()
                 
+                # --- LOGISTICS SECTION (For BOL) ---
+                st.divider()
+                st.subheader("🚚 Shipping Logistics (For Bill of Lading)")
+                c_log1, c_log2, c_log3 = st.columns(3)
+                
+                with c_log1:
+                    pallets = st.number_input("Total Pallets", min_value=1, value=1, step=1)
+                with c_log2:
+                    cartons = st.number_input("Total Cartons/Boxes", min_value=1, value=int(edited_df['Quantity'].sum()), step=1)
+                with c_log3:
+                    # Calculate Total Weight
+                    calc_weight = (edited_df['Quantity'] * edited_df['Weight (lbs)']).sum()
+                    st.metric("Calculated Net Weight (lbs)", f"{calc_weight:,.2f}")
+                    # Allow override for Gross Weight (Pallet + Wrapping)
+                    gross_weight = st.number_input("Total Gross Weight (lbs)", min_value=0.0, value=calc_weight + (pallets * 40), step=1.0)
+
                 # --- GENERATE FILES ---
+                # Generate unique tracking number once so it matches everywhere
+                unique_suffix = str(random.randint(10000000, 99999999))
+                hbol_number = f"HRUS{unique_suffix}"
+                
                 pdf_ci = generate_pdf("COMMERCIAL INVOICE", edited_df, inv_number, inv_date, 
                                       shipper_txt, importer_txt, consignee_txt, notes_txt, total_val, final_sig_bytes, signer_name)
                 pdf_po = generate_pdf("PURCHASE ORDER", edited_df, inv_number, inv_date, 
@@ -605,11 +740,14 @@ with tab_generate:
                 pdf_si = generate_pdf("SALES INVOICE", edited_df, inv_number, inv_date, 
                                       shipper_txt, importer_txt, consignee_txt, notes_txt, total_val, final_sig_bytes, signer_name)
                 
-                # Generate CustomsCity CSV using Ship-To (Consignee) address
-                csv_customs = generate_customscity_csv(edited_df, inv_number, inv_date, consignee_txt)
+                # BOL
+                pdf_bol = generate_bol_pdf(edited_df, inv_number, inv_date, shipper_txt, consignee_txt, "FX", hbol_number, pallets, cartons, gross_weight)
+                
+                # CSV (Pass hbol_number to keep it consistent)
+                csv_customs = generate_customscity_csv(edited_df, inv_number, inv_date, consignee_txt, hbol_number)
 
                 st.session_state['current_pdfs'] = {
-                    'ci': pdf_ci, 'po': pdf_po, 'si': pdf_si, 
+                    'ci': pdf_ci, 'po': pdf_po, 'si': pdf_si, 'bol': pdf_bol,
                     'inv_num': inv_number, 'total': total_val, 'buyer': importer_txt.split('\n')[0]
                 }
 
@@ -620,26 +758,24 @@ with tab_generate:
                 with col_left:
                     st.subheader("🖨️ Downloads")
                     # PDF Downloads
-                    c_pdf1, c_pdf2, c_pdf3 = st.columns(3)
-                    with c_pdf1: st.download_button("📄 Commercial Inv.", pdf_ci, f"CI-{inv_number}.pdf", "application/pdf")
-                    with c_pdf2: st.download_button("📄 Purchase Order", pdf_po, f"PO-{inv_number}.pdf", "application/pdf")
-                    with c_pdf3: st.download_button("📄 Sales Invoice", pdf_si, f"SI-{inv_number}.pdf", "application/pdf")
+                    c_pdf1, c_pdf2, c_pdf3, c_pdf4 = st.columns(4)
+                    with c_pdf1: st.download_button("📄 Commercial", pdf_ci, f"CI-{inv_number}.pdf", "application/pdf")
+                    with c_pdf2: st.download_button("📄 Purch. Order", pdf_po, f"PO-{inv_number}.pdf", "application/pdf")
+                    with c_pdf3: st.download_button("📄 Sales Inv.", pdf_si, f"SI-{inv_number}.pdf", "application/pdf")
+                    with c_pdf4: st.download_button("🚛 Bill of Lading", pdf_bol, f"BOL-{inv_number}.pdf", "application/pdf")
                     
                     st.divider()
-                    # Custom City CSV
                     st.download_button(
                         label="📥 Download CustomsCity CSV",
                         data=csv_customs,
-                        file_name=f"CustomsCity_Upload_{inv_number}.csv",
+                        file_name=f"CustomsCity_{inv_number}.csv",
                         mime="text/csv",
                         type="primary"
                     )
                 
                 with col_right:
                     st.subheader("📧 Email Center")
-                    with st.expander("⚙️ Sender Settings (Required)", expanded=False):
-                        st.info("You need an 'App Password' for Gmail. Normal passwords won't work.")
-                        
+                    with st.expander("⚙️ Sender Settings", expanded=False):
                         db_email = get_setting('smtp_email')
                         db_pass = get_setting('smtp_pass')
                         
@@ -652,8 +788,7 @@ with tab_generate:
                         if st.button("💾 Save Credentials"):
                             save_setting('smtp_email', sender_email.encode('utf-8'))
                             save_setting('smtp_pass', sender_pass.encode('utf-8'))
-                            st.success("Credentials Saved!")
-                            st.rerun()
+                            st.success("Saved!")
                     
                     recipient_email = st.text_input("Send To:", value="dean.turner@holisticroasters.com")
                     
@@ -667,12 +802,13 @@ with tab_generate:
                                 {'name': f"CI-{new_ver}.pdf", 'data': pdf_ci},
                                 {'name': f"PO-{new_ver}.pdf", 'data': pdf_po},
                                 {'name': f"SI-{new_ver}.pdf", 'data': pdf_si},
-                                {'name': f"CustomsCity_Upload_{new_ver}.csv", 'data': csv_customs}
+                                {'name': f"BOL-{new_ver}.pdf", 'data': pdf_bol},
+                                {'name': f"CustomsCity_{new_ver}.csv", 'data': csv_customs}
                             ]
                             
                             success, msg = send_email_with_attachments(sender_email, sender_pass, recipient_email, 
                                                                        f"Export Docs: {new_ver}", 
-                                                                       f"Attached are the export documents and CustomsCity CSV for {new_ver}.", 
+                                                                       f"Attached are the export documents for {new_ver}.", 
                                                                        files_to_send)
                             if success:
                                 st.success(f"✅ Sent to {recipient_email}")
@@ -687,7 +823,7 @@ with tab_catalog:
     st.header("📦 Product Catalog")
     col_tools1, col_tools2, col_tools3 = st.columns(3)
     with col_tools1:
-        template_df = pd.DataFrame(columns=['sku', 'product_name', 'description', 'hts_code', 'fda_code'])
+        template_df = pd.DataFrame(columns=['sku', 'product_name', 'description', 'hts_code', 'fda_code', 'weight_lbs'])
         csv_template = template_df.to_csv(index=False).encode('utf-8')
         st.download_button("📥 Download Template", csv_template, "catalog_template.csv", "text/csv")
     with col_tools2:
@@ -713,7 +849,11 @@ with tab_catalog:
 
     st.subheader("Edit Catalog")
     if not current_catalog.empty:
-        edited_catalog = st.data_editor(current_catalog, num_rows="dynamic")
+        # Show weight column in editor
+        edited_catalog = st.data_editor(current_catalog, num_rows="dynamic", 
+                                        column_config={
+                                            "weight_lbs": st.column_config.NumberColumn("Weight (lbs)", format="%.2f")
+                                        })
         if st.button("💾 Save Changes"):
             upsert_catalog_from_df(edited_catalog)
             st.success("Saved!")
