@@ -55,9 +55,10 @@ def save_invoice_metadata(inv_num, total_val, buyer):
         count = 0
         for num in existing_nums:
             if num == inv_num: count += 1
-            elif num.startswith(inv_num + "-"): count += 1
+            elif num.startswith(inv_num): count += 1
         
-        new_version_num = inv_num if count == 0 else f"{inv_num}-{count}"
+        # No hyphen, just append count if duplicate
+        new_version_num = inv_num if count == 0 else f"{inv_num}{count}"
         
         est = pytz.timezone('US/Eastern')
         timestamp = datetime.now(est).strftime("%Y-%m-%d %H:%M EST")
@@ -342,7 +343,6 @@ def generate_ci_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_sh
             (hts, 'C'), (fda, 'C'), (price, 'R'), (tot, 'R')
         ]
         
-        # Calculate Max Row Height using Pixel-Perfect Logic
         max_lines = 1
         for i, (txt, align) in enumerate(data_row):
             lines = get_lines_needed(txt, w[i] - 2) 
@@ -682,7 +682,7 @@ def generate_po_pdf(df, inv_num, inv_date, addr_buyer, addr_vendor, addr_ship, t
     return bytes(pdf.output())
 
 # --- BOL GENERATOR ---
-def generate_bol_pdf(df, inv_number, inv_date, shipper_txt, consignee_txt, carrier_code, hbol_number, pallets, cartons, total_weight_lbs, sig_bytes=None):
+def generate_bol_pdf(df, inv_number, inv_date, shipper_txt, consignee_txt, carrier_pdf_display, hbol_number, pallets, cartons, total_weight_lbs, sig_bytes=None):
     pdf = FPDF()
     for copy_num in range(2):
         pdf.add_page()
@@ -701,7 +701,7 @@ def generate_bol_pdf(df, inv_number, inv_date, shipper_txt, consignee_txt, carri
         pdf.set_font("Helvetica", '', 10)
         pdf.cell(40, 6, str(inv_date), 0, 0)
         
-        # INVOICE # REMOVED PER REQUEST
+        # INVOICE # REMOVED
         
         pdf.set_xy(130, y_top) 
         pdf.set_font("Helvetica", 'B', 10)
@@ -749,7 +749,7 @@ def generate_bol_pdf(df, inv_number, inv_date, shipper_txt, consignee_txt, carri
         pdf.ln(5)
         
         pdf.set_font("Helvetica", 'B', 11)
-        pdf.cell(0, 6, f"CARRIER: {carrier_code}", 0, 1)
+        pdf.cell(0, 6, f"CARRIER: {carrier_pdf_display}", 0, 1)
         pdf.ln(5)
         
         w = [15, 25, 100, 30, 20] 
@@ -842,17 +842,36 @@ def generate_bol_pdf(df, inv_number, inv_date, shipper_txt, consignee_txt, carri
 
 # --- CUSTOMSCITY CSV GENERATOR ---
 def generate_customscity_csv(df, inv_number, inv_date, ship_to_txt, hbol_number, carrier_code):
-    lines = ship_to_txt.split('\n')
-    c_name = lines[0].strip() if len(lines) > 0 else ""
-    c_addr = lines[1].strip() if len(lines) > 1 else ""
+    # UPDATED: Smarter address parsing
+    lines = [L.strip() for L in ship_to_txt.split('\n') if L.strip()]
+    c_name = lines[0] if len(lines) > 0 else ""
+    c_addr = ""
     c_city = ""
     c_state = ""
     c_zip = ""
-    c_country = "US" 
+    c_country = "US"
     
-    if len(lines) > 2:
-        line3 = lines[2].strip()
-        parts = line3.split(',')
+    if len(lines) >= 2:
+        # Last line typically City, State Zip Country
+        last_line = lines[-1]
+        
+        # If last line is just country, step back
+        if last_line.upper() in ["UNITED STATES", "USA", "US"]:
+            c_country = "US"
+            if len(lines) > 2:
+                last_line = lines[-2]
+                c_addr = ", ".join(lines[1:-2])
+            else:
+                c_addr = lines[1]
+        else:
+            # Last line is City State Zip
+            if len(lines) > 2:
+                c_addr = ", ".join(lines[1:-1])
+            else:
+                c_addr = lines[1]
+        
+        # Parse City/State/Zip from that line
+        parts = last_line.split(',')
         if len(parts) >= 1: c_city = parts[0].strip()
         if len(parts) >= 2:
             state_zip = parts[1].strip().split(' ')
@@ -909,8 +928,8 @@ with tab_generate:
     with st.expander("📝 Invoice Details, Addresses & Signature", expanded=True):
         c1, c2, c3 = st.columns(3)
         with c1:
-            default_id = f"{date.today().strftime('%Y%m%d')}-1"
-            inv_number = st.text_input("Daily Batch # (e.g., YYYYMMDD-1)", value=default_id)
+            default_id = f"{date.today().strftime('%Y%m%d')}1"
+            inv_number = st.text_input("Daily Batch # (e.g., YYYYMMDD1)", value=default_id)
             inv_date = st.date_input("Date", value=date.today())
             discount_rate = st.number_input("Target Transfer Discount %", min_value=0.0, max_value=100.0, value=75.0, step=0.1, format="%.1f")
             
@@ -928,8 +947,8 @@ with tab_generate:
             st.markdown("#### Carrier Settings")
             carrier_opt = st.selectbox("Select Carrier", ["FX (FedEx)", "GCYD (Green City)", "Other"])
             if carrier_opt == "Other":
-                carrier_code = st.text_input("Enter Custom Carrier Code")
-                carrier_pdf_display = carrier_code
+                carrier_code = st.text_input("Enter Custom Carrier Code (for CSV)")
+                carrier_pdf_display = st.text_input("Enter Carrier Name (for PDF)")
             elif "FX" in carrier_opt:
                 carrier_code = "FX"
                 carrier_pdf_display = "FedEx (FX)"
@@ -1077,8 +1096,10 @@ with tab_generate:
                 pdf_si = generate_si_pdf(edited_df, si_id, inv_date, 
                                       shipper_txt, importer_txt, consignee_txt, notes_txt, total_val, final_sig_bytes, signer_name)
                 
+                # Pass carrier_pdf_display for visual
                 pdf_bol = generate_bol_pdf(edited_df, inv_number, inv_date, shipper_txt, consignee_txt, carrier_pdf_display, bol_id, pallets, cartons, gross_weight, final_sig_bytes)
                 
+                # Pass carrier_code for CSV
                 csv_customs = generate_customscity_csv(edited_df, inv_number, inv_date, consignee_txt, hbol_clean, carrier_code)
 
                 st.session_state['current_pdfs'] = {
