@@ -466,7 +466,6 @@ def generate_si_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes,
     pdf.set_y(y_mid + 35)
 
     # --- TABLE HEADERS (Simplified) ---
-    # Widths: QTY, PRODUCT, UNIT, TOTAL
     w = [20, 100, 35, 35] 
     headers = ["QTY", "PRODUCT", "UNIT ($)", "TOTAL ($)"]
     
@@ -504,7 +503,6 @@ def generate_si_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes,
     for _, row in df.iterrows():
         qty = str(int(row['Quantity']))
         prod_name = str(row['Product Name'])
-        # No Description, HTS, FDA
         price = f"{row['Transfer Price (Unit)']:.2f}"
         tot = f"{row['Transfer Total']:.2f}"
         
@@ -607,7 +605,7 @@ def generate_bol_pdf(df, inv_number, inv_date, shipper_txt, consignee_txt, carri
     
     pdf.ln(10)
     
-    # --- HELPER: Exact Line Counter ---
+    # Helper: Exact Line Counter
     def get_lines_needed(text, width):
         if not text: return 1
         lines = 0
@@ -628,10 +626,8 @@ def generate_bol_pdf(df, inv_number, inv_date, shipper_txt, consignee_txt, carri
             lines += lines_para
         return lines
 
-    # Addresses
     y_addr = pdf.get_y()
     
-    # Shipper
     pdf.set_xy(10, y_addr)
     pdf.set_font("Helvetica", 'B', 11)
     pdf.cell(90, 6, "SHIP FROM (SHIPPER)", 1, 1, 'L', fill=False)
@@ -640,7 +636,6 @@ def generate_bol_pdf(df, inv_number, inv_date, shipper_txt, consignee_txt, carri
     
     pdf.ln(5)
     
-    # Consignee
     pdf.set_x(10)
     pdf.set_font("Helvetica", 'B', 11)
     pdf.cell(0, 6, "SHIP TO (CONSIGNEE)", 1, 1, 'L', fill=False)
@@ -653,7 +648,6 @@ def generate_bol_pdf(df, inv_number, inv_date, shipper_txt, consignee_txt, carri
     pdf.cell(0, 6, f"CARRIER: {carrier_name}", 0, 1)
     pdf.ln(5)
     
-    # --- HANDLING UNITS TABLE ---
     w = [15, 25, 100, 30, 20] 
     headers = ["HM", "QTY", "DESCRIPTION OF COMMODITY", "WEIGHT", "CLASS"]
     
@@ -848,6 +842,10 @@ with tab_generate:
         final_sig_bytes = saved_sig_bytes if saved_sig_bytes else (sig_upload.getvalue() if sig_upload else None)
 
     st.subheader("Upload Orders")
+    
+    # --- TOTAL SALES METRIC ---
+    total_sales_container = st.empty() # Placeholder for total sales
+    
     uploaded_file = st.file_uploader("Upload Daily Orders CSV", type=['csv'])
 
     if uploaded_file:
@@ -865,7 +863,6 @@ with tab_generate:
                 sales_data = us_shipments[['Variant code / SKU', 'Item variant', 'Quantity', 'Price per unit', 'Discount']].copy()
                 sales_data['Variant code / SKU'] = sales_data['Variant code / SKU'].astype(str)
                 
-                # COUNT UNIQUE ORDERS FOR CARTONS
                 possible_order_cols = ['SO #', 'Name', 'Order Name', 'Order Number']
                 order_col = next((col for col in possible_order_cols if col in us_shipments.columns), None)
                 unique_orders_count = us_shipments[order_col].nunique() if order_col else 1
@@ -927,6 +924,9 @@ with tab_generate:
                 
                 total_val = edited_df['Transfer Total'].sum()
                 
+                # UPDATE METRIC
+                total_sales_container.metric(label="💰 TOTAL SALES VALUE (USD)", value=f"${total_val:,.2f}")
+                
                 # --- LOGISTICS SECTION ---
                 st.divider()
                 st.subheader("🚚 Shipping Logistics (For Bill of Lading)")
@@ -950,7 +950,6 @@ with tab_generate:
                 pdf_po = generate_pdf("PURCHASE ORDER", edited_df, inv_number, inv_date, 
                                       importer_txt, shipper_txt, consignee_txt, notes_txt, total_val, final_sig_bytes, signer_name)
                 
-                # Use dedicated SI function
                 pdf_si = generate_si_pdf(edited_df, inv_number, inv_date, 
                                       shipper_txt, importer_txt, consignee_txt, notes_txt, total_val, final_sig_bytes, signer_name)
                 
@@ -1043,7 +1042,6 @@ with tab_catalog:
             csv_current = current_catalog.to_csv(index=False).encode('utf-8')
             st.download_button("📥 Download Catalog", csv_current, "full_catalog.csv", "text/csv")
     with col_tools3:
-        # Added safety checkbox
         if st.checkbox("I want to clear the entire catalog"):
             if st.button("⚠️ Clear Catalog Permanently"):
                 clear_catalog()
