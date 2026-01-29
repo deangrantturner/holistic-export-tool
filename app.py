@@ -221,8 +221,8 @@ class ProInvoice(FPDF):
     def footer(self):
         pass
 
-# --- STANDARD GENERATOR (For CI / PO) ---
-def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes, total_val, sig_bytes=None, signer_name="Dean Turner"):
+# --- 1. COMMERCIAL INVOICE GENERATOR ---
+def generate_ci_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes, total_val, sig_bytes=None, signer_name="Dean Turner"):
     pdf = ProInvoice()
     pdf.add_page()
     pdf.set_auto_page_break(auto=False)
@@ -239,8 +239,7 @@ def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship,
     # Column 1
     pdf.set_xy(10, y_start)
     pdf.set_font("Helvetica", 'B', 10)
-    lbl_from = "SHIPPER / EXPORTER:" if "COMMERCIAL" in doc_type else "FROM (SELLER):"
-    if "PURCHASE" in doc_type: lbl_from = "FROM (BUYER):"
+    lbl_from = "SHIPPER / EXPORTER:"
     pdf.cell(70, 5, lbl_from, 0, 1)
     pdf.set_x(10) 
     pdf.set_font("Helvetica", '', 9)
@@ -250,7 +249,7 @@ def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship,
     # Column 2
     pdf.set_xy(90, y_start) 
     pdf.set_font("Helvetica", 'B', 10)
-    lbl_to = "CONSIGNEE (SHIP TO):" if "COMMERCIAL" in doc_type else "SHIP TO:"
+    lbl_to = "CONSIGNEE (SHIP TO):"
     pdf.cell(70, 5, lbl_to, 0, 1)
     pdf.set_xy(90, pdf.get_y()) 
     pdf.set_font("Helvetica", '', 9)
@@ -261,16 +260,14 @@ def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship,
     x_right = 160
     pdf.set_xy(x_right, y_start)
     pdf.set_font("Helvetica", 'B', 12)
-    # UPDATED: Label Invoice #:
     pdf.cell(40, 6, f"Invoice #: {inv_num}", 0, 1, 'R')
     pdf.set_x(x_right)
     pdf.set_font("Helvetica", '', 10)
     pdf.cell(40, 6, f"Date: {inv_date}", 0, 1, 'R')
     pdf.set_x(x_right)
     pdf.cell(40, 6, "Currency: USD", 0, 1, 'R')
-    if "COMMERCIAL" in doc_type:
-        pdf.set_x(x_right)
-        pdf.cell(40, 6, "Origin: CANADA", 0, 1, 'R')
+    pdf.set_x(x_right)
+    pdf.cell(40, 6, "Origin: CANADA", 0, 1, 'R')
     y_end_3 = pdf.get_y()
 
     # Row 2
@@ -278,8 +275,7 @@ def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship,
     
     pdf.set_xy(10, y_mid)
     pdf.set_font("Helvetica", 'B', 10)
-    lbl_bill = "IMPORTER OF RECORD:" if "COMMERCIAL" in doc_type else "BILL TO:"
-    if "PURCHASE" in doc_type: lbl_bill = "TO (VENDOR):"
+    lbl_bill = "IMPORTER OF RECORD:"
     pdf.cell(80, 5, lbl_bill, 0, 1)
     pdf.set_x(10)
     pdf.set_font("Helvetica", '', 9)
@@ -409,22 +405,19 @@ def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship,
 
     return bytes(pdf.output())
 
-# --- NEW: SALES INVOICE GENERATOR (SIMPLIFIED & NO SIGNATURE) ---
-def generate_si_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes, total_val, sig_bytes=None, signer_name="Dean Turner"):
+# --- 2. SALES INVOICE GENERATOR ---
+def generate_si_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, total_val, signer_name="Dean Turner"):
     pdf = ProInvoice()
     pdf.add_page()
     pdf.set_auto_page_break(auto=False)
     
-    # --- HEADER ---
     pdf.set_font('Helvetica', 'B', 20)
     pdf.cell(0, 10, "SALES INVOICE", 0, 1, 'C')
     pdf.ln(5)
 
-    # --- INFO BLOCKS ---
     pdf.set_font("Helvetica", '', 9)
     y_start = pdf.get_y()
     
-    # Column 1
     pdf.set_xy(10, y_start)
     pdf.set_font("Helvetica", 'B', 10)
     pdf.cell(70, 5, "SHIPPER / EXPORTER:", 0, 1)
@@ -433,7 +426,6 @@ def generate_si_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes,
     pdf.multi_cell(70, 4, addr_from)
     y_end_1 = pdf.get_y()
 
-    # Column 2
     pdf.set_xy(90, y_start) 
     pdf.set_font("Helvetica", 'B', 10)
     pdf.cell(70, 5, "SHIP TO:", 0, 1)
@@ -442,11 +434,9 @@ def generate_si_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes,
     pdf.multi_cell(70, 4, addr_ship)
     y_end_2 = pdf.get_y()
 
-    # Column 3
     x_right = 160
     pdf.set_xy(x_right, y_start)
     pdf.set_font("Helvetica", 'B', 12)
-    # UPDATED: Label Invoice #:
     pdf.cell(40, 6, f"Invoice #: {inv_num}", 0, 1, 'R')
     pdf.set_x(x_right)
     pdf.set_font("Helvetica", '', 10)
@@ -455,7 +445,6 @@ def generate_si_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes,
     pdf.cell(40, 6, "Currency: USD", 0, 1, 'R')
     y_end_3 = pdf.get_y()
 
-    # Row 2 (Bill To only, no Notes Box)
     y_mid = max(y_end_1, y_end_2, y_end_3) + 10
     
     pdf.set_xy(10, y_mid)
@@ -467,7 +456,6 @@ def generate_si_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes,
     
     pdf.set_y(y_mid + 35)
 
-    # --- TABLE HEADERS (Simplified) ---
     w = [20, 100, 35, 35] 
     headers = ["QTY", "PRODUCT", "UNIT ($)", "TOTAL ($)"]
     
@@ -477,14 +465,11 @@ def generate_si_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes,
         pdf.cell(w[i], 8, h, 1, 0, 'C', fill=True)
     pdf.ln()
     
-    # --- HELPER: Exact Line Counter ---
     def get_lines_needed(text, width):
         if not text: return 1
         lines = 0
         for para in str(text).split('\n'):
-            if not para:
-                lines += 1
-                continue
+            if not para: lines += 1; continue
             words = para.split(' ')
             curr_w = 0
             lines_para = 1
@@ -498,7 +483,6 @@ def generate_si_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes,
             lines += lines_para
         return lines
 
-    # --- DYNAMIC TABLE ROWS ---
     pdf.set_font("Helvetica", '', 7)
     line_h = 5
 
@@ -508,9 +492,7 @@ def generate_si_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes,
         price = f"{row['Transfer Price (Unit)']:.2f}"
         tot = f"{row['Transfer Total']:.2f}"
         
-        data_row = [
-            (qty, 'C'), (prod_name, 'L'), (price, 'R'), (tot, 'R')
-        ]
+        data_row = [ (qty, 'C'), (prod_name, 'L'), (price, 'R'), (tot, 'R') ]
         
         max_lines = 1
         for i, (txt, align) in enumerate(data_row):
@@ -551,6 +533,139 @@ def generate_si_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes,
     
     return bytes(pdf.output())
 
+# --- 3. PURCHASE ORDER GENERATOR ---
+def generate_po_pdf(df, inv_num, inv_date, addr_buyer, addr_vendor, addr_ship, total_val):
+    pdf = ProInvoice()
+    pdf.add_page()
+    pdf.set_auto_page_break(auto=False)
+    
+    # --- HEADER ---
+    pdf.set_font('Helvetica', 'B', 20)
+    pdf.cell(0, 10, "PURCHASE ORDER", 0, 1, 'C')
+    pdf.ln(5)
+
+    pdf.set_font("Helvetica", '', 9)
+    y_start = pdf.get_y()
+    
+    # Column 1
+    pdf.set_xy(10, y_start)
+    pdf.set_font("Helvetica", 'B', 10)
+    pdf.cell(70, 5, "FROM (BUYER):", 0, 1)
+    pdf.set_x(10) 
+    pdf.set_font("Helvetica", '', 9)
+    pdf.multi_cell(70, 4, addr_buyer)
+    y_end_1 = pdf.get_y()
+
+    # Column 2
+    pdf.set_xy(90, y_start) 
+    pdf.set_font("Helvetica", 'B', 10)
+    pdf.cell(70, 5, "SHIP TO:", 0, 1)
+    pdf.set_xy(90, pdf.get_y()) 
+    pdf.set_font("Helvetica", '', 9)
+    pdf.multi_cell(70, 4, addr_ship)
+    y_end_2 = pdf.get_y()
+
+    # Column 3
+    x_right = 160
+    pdf.set_xy(x_right, y_start)
+    pdf.set_font("Helvetica", 'B', 12)
+    pdf.cell(40, 6, f"Invoice #: {inv_num}", 0, 1, 'R')
+    pdf.set_x(x_right)
+    pdf.set_font("Helvetica", '', 10)
+    pdf.cell(40, 6, f"Date: {inv_date}", 0, 1, 'R')
+    pdf.set_x(x_right)
+    pdf.cell(40, 6, "Currency: USD", 0, 1, 'R')
+    y_end_3 = pdf.get_y()
+
+    y_mid = max(y_end_1, y_end_2, y_end_3) + 10
+    
+    pdf.set_xy(10, y_mid)
+    pdf.set_font("Helvetica", 'B', 10)
+    pdf.cell(80, 5, "TO (VENDOR):", 0, 1)
+    pdf.set_x(10)
+    pdf.set_font("Helvetica", '', 9)
+    pdf.multi_cell(80, 4, addr_vendor)
+    
+    pdf.set_y(y_mid + 35)
+
+    # --- TABLE HEADERS ---
+    w = [20, 100, 35, 35] 
+    headers = ["QTY", "PRODUCT", "UNIT ($)", "TOTAL ($)"]
+    
+    pdf.set_font("Helvetica", 'B', 7)
+    pdf.set_fill_color(220, 220, 220)
+    for i, h in enumerate(headers):
+        pdf.cell(w[i], 8, h, 1, 0, 'C', fill=True)
+    pdf.ln()
+    
+    def get_lines_needed(text, width):
+        if not text: return 1
+        lines = 0
+        for para in str(text).split('\n'):
+            if not para: lines += 1; continue
+            words = para.split(' ')
+            curr_w = 0
+            lines_para = 1
+            for word in words:
+                word_w = pdf.get_string_width(word + " ")
+                if curr_w + word_w > width:
+                    lines_para += 1
+                    curr_w = word_w
+                else:
+                    curr_w += word_w
+            lines += lines_para
+        return lines
+
+    pdf.set_font("Helvetica", '', 7)
+    line_h = 5
+
+    for _, row in df.iterrows():
+        qty = str(int(row['Quantity']))
+        prod_name = str(row['Product Name'])
+        price = f"{row['Transfer Price (Unit)']:.2f}"
+        tot = f"{row['Transfer Total']:.2f}"
+        
+        data_row = [ (qty, 'C'), (prod_name, 'L'), (price, 'R'), (tot, 'R') ]
+        
+        max_lines = 1
+        for i, (txt, align) in enumerate(data_row):
+            lines = get_lines_needed(txt, w[i] - 2) 
+            if lines > max_lines: max_lines = lines
+            
+        row_h = max_lines * line_h
+        
+        if pdf.get_y() + row_h > 270:
+            pdf.add_page()
+            pdf.set_font("Helvetica", 'B', 7)
+            pdf.set_fill_color(220, 220, 220)
+            for i, h in enumerate(headers):
+                pdf.cell(w[i], 8, h, 1, 0, 'C', fill=True)
+            pdf.ln()
+            pdf.set_font("Helvetica", '', 7)
+            
+        y_start = pdf.get_y()
+        x_start = 10
+        
+        for i, (txt, align) in enumerate(data_row):
+            current_x = x_start + sum(w[:i])
+            pdf.set_xy(current_x, y_start)
+            pdf.multi_cell(w[i], line_h, txt, 0, align)
+            
+        pdf.set_xy(x_start, y_start)
+        for i in range(len(w)):
+            current_x = x_start + sum(w[:i])
+            pdf.rect(current_x, y_start, w[i], row_h)
+            
+        pdf.set_xy(x_start, y_start + row_h)
+
+    pdf.ln(2)
+    pdf.set_font("Helvetica", 'B', 9)
+    pdf.set_x(10)
+    pdf.cell(sum(w[:-1]), 8, "TOTAL (USD):", 0, 0, 'R')
+    pdf.cell(w[-1], 8, f"${total_val:,.2f}", 1, 1, 'R')
+    
+    return bytes(pdf.output())
+
 # --- BOL GENERATOR ---
 def generate_bol_pdf(df, inv_number, inv_date, shipper_txt, consignee_txt, carrier_name, hbol_number, pallets, cartons, total_weight_lbs, sig_bytes=None):
     pdf = FPDF()
@@ -571,10 +686,8 @@ def generate_bol_pdf(df, inv_number, inv_date, shipper_txt, consignee_txt, carri
     pdf.cell(40, 6, str(inv_date), 0, 0)
     
     pdf.set_font("Helvetica", 'B', 10)
-    # UPDATED: Invoice #:
     pdf.cell(35, 6, "Invoice #:", 0, 0)
     pdf.set_font("Helvetica", '', 10)
-    # UPDATED: Reference HRU...
     pdf.cell(40, 6, f"HRU{inv_number}", 0, 0)
     
     pdf.set_xy(130, y_top) 
@@ -585,14 +698,11 @@ def generate_bol_pdf(df, inv_number, inv_date, shipper_txt, consignee_txt, carri
     
     pdf.ln(10)
     
-    # Helper: Exact Line Counter
     def get_lines_needed(text, width):
         if not text: return 1
         lines = 0
         for para in str(text).split('\n'):
-            if not para:
-                lines += 1
-                continue
+            if not para: lines += 1; continue
             words = para.split(' ')
             curr_w = 0
             lines_para = 1
@@ -785,7 +895,6 @@ with tab_generate:
     with st.expander("📝 Invoice Details, Addresses & Signature", expanded=True):
         c1, c2, c3 = st.columns(3)
         with c1:
-            # UPDATED: Default ID to Date-Counter
             default_id = f"{date.today().strftime('%Y%m%d')}-1"
             inv_number = st.text_input("Daily Batch # (e.g., YYYYMMDD-1)", value=default_id)
             inv_date = st.date_input("Date", value=date.today())
@@ -924,17 +1033,17 @@ with tab_generate:
                     gross_weight = st.number_input("Total Gross Weight (lbs)", min_value=0.0, value=calc_weight + (pallets * 40), step=1.0)
 
                 # --- GENERATE FILES ---
-                # Generate Document IDs with HRU Prefix
                 base_id = inv_number
                 ci_id = f"CI-HRU{base_id}"
                 si_id = f"SI-HRU{base_id}"
                 po_id = f"PO-HRU{base_id}"
                 bol_id = f"BOL-HRU{base_id}"
                 
-                pdf_ci = generate_pdf("COMMERCIAL INVOICE", edited_df, ci_id, inv_date, 
+                pdf_ci = generate_ci_pdf("COMMERCIAL INVOICE", edited_df, ci_id, inv_date, 
                                       shipper_txt, importer_txt, consignee_txt, notes_txt, total_val, final_sig_bytes, signer_name)
-                pdf_po = generate_pdf("PURCHASE ORDER", edited_df, po_id, inv_date, 
-                                      importer_txt, shipper_txt, consignee_txt, notes_txt, total_val, final_sig_bytes, signer_name)
+                
+                pdf_po = generate_po_pdf(edited_df, po_id, inv_date, 
+                                      importer_txt, shipper_txt, consignee_txt, total_val)
                 
                 pdf_si = generate_si_pdf(edited_df, si_id, inv_date, 
                                       shipper_txt, importer_txt, consignee_txt, notes_txt, total_val, final_sig_bytes, signer_name)
