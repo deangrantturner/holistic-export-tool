@@ -57,6 +57,7 @@ def save_invoice_metadata(inv_num, total_val, buyer):
             if num == inv_num: count += 1
             elif num.startswith(inv_num): count += 1
         
+        # No hyphen
         new_version_num = inv_num if count == 0 else f"{inv_num}{count}"
         
         est = pytz.timezone('US/Eastern')
@@ -342,7 +343,6 @@ def generate_ci_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_sh
             (hts, 'C'), (fda, 'C'), (price, 'R'), (tot, 'R')
         ]
         
-        # Calculate Max Row Height using Pixel-Perfect Logic
         max_lines = 1
         for i, (txt, align) in enumerate(data_row):
             lines = get_lines_needed(txt, w[i] - 2) 
@@ -962,7 +962,23 @@ with tab_generate:
         carrier_col, sig_col = st.columns(2)
         with carrier_col:
             st.markdown("#### Carrier Settings")
-            carrier_opt = st.selectbox("Select Carrier", ["FX (FedEx)", "GCYD (Green City)", "Other"])
+            
+            # LOAD DEFAULT CARRIER FROM DB
+            carrier_options = ["FX (FedEx)", "GCYD (Green City)", "Other"]
+            saved_carrier_bytes = get_setting('default_carrier')
+            default_idx = 0
+            if saved_carrier_bytes:
+                saved_carrier_str = saved_carrier_bytes.decode('utf-8')
+                if saved_carrier_str in carrier_options:
+                    default_idx = carrier_options.index(saved_carrier_str)
+            
+            carrier_opt = st.selectbox("Select Carrier", carrier_options, index=default_idx)
+            
+            # SAVE DEFAULT BUTTON
+            if st.button("💾 Save as Default"):
+                save_setting('default_carrier', carrier_opt.encode('utf-8'))
+                st.success(f"Default set to {carrier_opt}")
+            
             if carrier_opt == "Other":
                 carrier_code = st.text_input("Enter Custom Carrier Code (for CSV)")
                 carrier_pdf_display = st.text_input("Enter Carrier Name (for PDF)")
@@ -1102,7 +1118,6 @@ with tab_generate:
                 po_id = f"PO-HRUS{base_id}"
                 bol_id = f"BOL-HRUS{base_id}"
                 
-                # Using HRUS base for tracking in CSV
                 hbol_clean = f"HRUS{base_id}"
                 
                 pdf_ci = generate_ci_pdf("COMMERCIAL INVOICE", edited_df, ci_id, inv_date, 
