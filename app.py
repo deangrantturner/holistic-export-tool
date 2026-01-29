@@ -343,6 +343,7 @@ def generate_ci_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_sh
             (hts, 'C'), (fda, 'C'), (price, 'R'), (tot, 'R')
         ]
         
+        # Calculate Max Row Height using Pixel-Perfect Logic
         max_lines = 1
         for i, (txt, align) in enumerate(data_row):
             lines = get_lines_needed(txt, w[i] - 2) 
@@ -548,7 +549,142 @@ def generate_si_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes,
     
     return bytes(pdf.output())
 
-# --- 3. PURCHASE ORDER GENERATOR ---
+# --- 3. PACKING LIST GENERATOR (NEW) ---
+def generate_pl_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, cartons):
+    pdf = ProInvoice()
+    pdf.add_page()
+    pdf.set_auto_page_break(auto=False)
+    
+    # --- HEADER ---
+    pdf.set_font('Helvetica', 'B', 20)
+    pdf.cell(0, 10, "PACKING LIST", 0, 1, 'C')
+    pdf.ln(5)
+
+    # --- INFO BLOCKS ---
+    pdf.set_font("Helvetica", '', 9)
+    y_start = pdf.get_y()
+    
+    # Column 1
+    pdf.set_xy(10, y_start)
+    pdf.set_font("Helvetica", 'B', 10)
+    pdf.cell(70, 5, "SHIPPER / EXPORTER:", 0, 1)
+    pdf.set_x(10) 
+    pdf.set_font("Helvetica", '', 9)
+    pdf.multi_cell(70, 4, addr_from)
+    y_end_1 = pdf.get_y()
+
+    # Column 2
+    pdf.set_xy(90, y_start) 
+    pdf.set_font("Helvetica", 'B', 10)
+    pdf.cell(70, 5, "SHIP TO:", 0, 1)
+    pdf.set_xy(90, pdf.get_y()) 
+    pdf.set_font("Helvetica", '', 9)
+    pdf.multi_cell(70, 4, addr_ship)
+    y_end_2 = pdf.get_y()
+
+    # Column 3
+    x_right = 160
+    pdf.set_xy(x_right, y_start)
+    pdf.set_font("Helvetica", 'B', 12)
+    pdf.cell(40, 6, f"Packing List #: {inv_num}", 0, 1, 'R')
+    pdf.set_x(x_right)
+    pdf.set_font("Helvetica", '', 10)
+    pdf.cell(40, 6, f"Date: {inv_date}", 0, 1, 'R')
+    # No Currency
+    y_end_3 = pdf.get_y()
+
+    # Row 2 (Bill To)
+    y_mid = max(y_end_1, y_end_2, y_end_3) + 10
+    
+    pdf.set_xy(10, y_mid)
+    pdf.set_font("Helvetica", 'B', 10)
+    pdf.cell(80, 5, "BILL TO:", 0, 1)
+    pdf.set_x(10)
+    pdf.set_font("Helvetica", '', 9)
+    pdf.multi_cell(80, 4, addr_to)
+    
+    pdf.set_y(y_mid + 35)
+
+    # --- TABLE HEADERS ---
+    w = [30, 160] 
+    headers = ["QTY", "PRODUCT"]
+    
+    pdf.set_font("Helvetica", 'B', 7)
+    pdf.set_fill_color(220, 220, 220)
+    for i, h in enumerate(headers):
+        pdf.cell(w[i], 8, h, 1, 0, 'C', fill=True)
+    pdf.ln()
+    
+    def get_lines_needed(text, width):
+        if not text: return 1
+        lines = 0
+        for para in str(text).split('\n'):
+            if not para:
+                lines += 1
+                continue
+            words = para.split(' ')
+            curr_w = 0
+            lines_para = 1
+            for word in words:
+                word_w = pdf.get_string_width(word + " ")
+                if curr_w + word_w > width:
+                    lines_para += 1
+                    curr_w = word_w
+                else:
+                    curr_w += word_w
+            lines += lines_para
+        return lines
+
+    pdf.set_font("Helvetica", '', 7)
+    line_h = 5
+
+    for _, row in df.iterrows():
+        qty = str(int(row['Quantity']))
+        prod_name = str(row['Product Name'])
+        
+        data_row = [
+            (qty, 'C'), (prod_name, 'L')
+        ]
+        
+        max_lines = 1
+        for i, (txt, align) in enumerate(data_row):
+            lines = get_lines_needed(txt, w[i] - 2) 
+            if lines > max_lines: max_lines = lines
+            
+        row_h = max_lines * line_h
+        
+        if pdf.get_y() + row_h > 270:
+            pdf.add_page()
+            pdf.set_font("Helvetica", 'B', 7)
+            pdf.set_fill_color(220, 220, 220)
+            for i, h in enumerate(headers):
+                pdf.cell(w[i], 8, h, 1, 0, 'C', fill=True)
+            pdf.ln()
+            pdf.set_font("Helvetica", '', 7)
+            
+        y_start = pdf.get_y()
+        x_start = 10
+        
+        for i, (txt, align) in enumerate(data_row):
+            current_x = x_start + sum(w[:i])
+            pdf.set_xy(current_x, y_start)
+            pdf.multi_cell(w[i], line_h, txt, 0, align)
+            
+        pdf.set_xy(x_start, y_start)
+        for i in range(len(w)):
+            current_x = x_start + sum(w[:i])
+            pdf.rect(current_x, y_start, w[i], row_h)
+            
+        pdf.set_xy(x_start, y_start + row_h)
+
+    pdf.ln(2)
+    pdf.set_font("Helvetica", 'B', 10)
+    pdf.set_x(10)
+    pdf.cell(sum(w), 8, f"TOTAL CARTONS: {cartons}", 0, 1, 'R')
+    
+    return bytes(pdf.output())
+
+# --- 4. PURCHASE ORDER GENERATOR ---
 def generate_po_pdf(df, inv_num, inv_date, addr_buyer, addr_vendor, addr_ship, total_val):
     pdf = ProInvoice()
     pdf.add_page()
@@ -1117,6 +1253,7 @@ with tab_generate:
                 si_id = f"SI-HRUS{base_id}"
                 po_id = f"PO-HRUS{base_id}"
                 bol_id = f"BOL-HRUS{base_id}"
+                pl_id = f"PL-HRUS{base_id}" # NEW
                 
                 hbol_clean = f"HRUS{base_id}"
                 
@@ -1129,6 +1266,10 @@ with tab_generate:
                 pdf_si = generate_si_pdf(edited_df, si_id, inv_date, 
                                       shipper_txt, importer_txt, consignee_txt, notes_txt, total_val, final_sig_bytes, signer_name)
                 
+                # NEW PL Generator Call
+                pdf_pl = generate_pl_pdf(edited_df, pl_id, inv_date,
+                                      shipper_txt, importer_txt, consignee_txt, cartons)
+                
                 # Pass carrier_pdf_display for visual
                 pdf_bol = generate_bol_pdf(edited_df, inv_number, inv_date, shipper_txt, consignee_txt, carrier_pdf_display, bol_id, pallets, cartons, gross_weight, final_sig_bytes)
                 
@@ -1136,7 +1277,7 @@ with tab_generate:
                 csv_customs = generate_customscity_csv(edited_df, inv_number, inv_date, consignee_txt, hbol_clean, carrier_code)
 
                 st.session_state['current_pdfs'] = {
-                    'ci': pdf_ci, 'po': pdf_po, 'si': pdf_si, 'bol': pdf_bol,
+                    'ci': pdf_ci, 'po': pdf_po, 'si': pdf_si, 'bol': pdf_bol, 'pl': pdf_pl,
                     'inv_num': inv_number, 'total': total_val, 'buyer': importer_txt.split('\n')[0]
                 }
 
@@ -1146,11 +1287,12 @@ with tab_generate:
                 
                 with col_left:
                     st.subheader("🖨️ Downloads")
-                    c_pdf1, c_pdf2, c_pdf3, c_pdf4 = st.columns(4)
+                    c_pdf1, c_pdf2, c_pdf3, c_pdf4, c_pdf5 = st.columns(5) # Added 5th column
                     with c_pdf1: st.download_button("📄 Commercial", pdf_ci, f"{ci_id}.pdf", "application/pdf")
                     with c_pdf2: st.download_button("📄 Purch. Order", pdf_po, f"{po_id}.pdf", "application/pdf")
                     with c_pdf3: st.download_button("📄 Sales Inv.", pdf_si, f"{si_id}.pdf", "application/pdf")
-                    with c_pdf4: st.download_button("🚛 Bill of Lading", pdf_bol, f"{bol_id}.pdf", "application/pdf")
+                    with c_pdf4: st.download_button("📋 Packing List", pdf_pl, f"{pl_id}.pdf", "application/pdf") # New Button
+                    with c_pdf5: st.download_button("🚛 Bill of Lading", pdf_bol, f"{bol_id}.pdf", "application/pdf")
                     
                     st.divider()
                     st.download_button(
@@ -1190,6 +1332,7 @@ with tab_generate:
                                 {'name': f"{ci_id}.pdf", 'data': pdf_ci},
                                 {'name': f"{po_id}.pdf", 'data': pdf_po},
                                 {'name': f"{si_id}.pdf", 'data': pdf_si},
+                                {'name': f"{pl_id}.pdf", 'data': pdf_pl}, # Added PL
                                 {'name': f"{bol_id}.pdf", 'data': pdf_bol},
                                 {'name': f"CustomsCity_{new_ver}.csv", 'data': csv_customs}
                             ]
