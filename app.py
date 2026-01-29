@@ -221,8 +221,8 @@ class ProInvoice(FPDF):
     def footer(self):
         pass
 
-# --- STANDARD GENERATOR (For CI / PO) ---
-def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes, total_val, sig_bytes=None, signer_name="Dean Turner"):
+# --- 1. COMMERCIAL INVOICE GENERATOR ---
+def generate_ci_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes, total_val, sig_bytes=None, signer_name="Dean Turner"):
     pdf = ProInvoice()
     pdf.add_page()
     pdf.set_auto_page_break(auto=False)
@@ -406,7 +406,7 @@ def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship,
 
     return bytes(pdf.output())
 
-# --- NEW: SALES INVOICE GENERATOR ---
+# --- 2. SALES INVOICE GENERATOR ---
 def generate_si_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes, total_val, sig_bytes=None, signer_name="Dean Turner"):
     pdf = ProInvoice()
     pdf.add_page()
@@ -443,7 +443,6 @@ def generate_si_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes,
     x_right = 160
     pdf.set_xy(x_right, y_start)
     pdf.set_font("Helvetica", 'B', 12)
-    # UPDATED: Label Invoice #:
     pdf.cell(40, 6, f"Invoice #: {inv_num}", 0, 1, 'R')
     pdf.set_x(x_right)
     pdf.set_font("Helvetica", '', 10)
@@ -684,7 +683,6 @@ def generate_po_pdf(df, inv_num, inv_date, addr_buyer, addr_vendor, addr_ship, t
 # --- BOL GENERATOR ---
 def generate_bol_pdf(df, inv_number, inv_date, shipper_txt, consignee_txt, carrier_code, hbol_number, pallets, cartons, total_weight_lbs, sig_bytes=None):
     pdf = FPDF()
-    # LOOP FOR 2 COPIES
     for copy_num in range(2):
         pdf.add_page()
         pdf.set_auto_page_break(auto=False)
