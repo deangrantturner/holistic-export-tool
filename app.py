@@ -57,7 +57,6 @@ def save_invoice_metadata(inv_num, total_val, buyer):
             if num == inv_num: count += 1
             elif num.startswith(inv_num): count += 1
         
-        # No hyphen
         new_version_num = inv_num if count == 0 else f"{inv_num}{count}"
         
         est = pytz.timezone('US/Eastern')
@@ -220,11 +219,15 @@ class ProInvoice(FPDF):
     def header(self):
         pass
     def footer(self):
-        pass
+        self.set_y(-15)
+        self.set_font('Helvetica', 'I', 8)
+        # Page X of Y
+        self.cell(0, 10, f'Page {self.page_no()} of {{nb}}', 0, 0, 'R')
 
 # --- 1. COMMERCIAL INVOICE GENERATOR ---
 def generate_ci_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes, total_val, sig_bytes=None, signer_name="Dean Turner"):
     pdf = ProInvoice()
+    pdf.alias_nb_pages() # Enables total page count
     pdf.add_page()
     pdf.set_auto_page_break(auto=False)
     
@@ -410,6 +413,7 @@ def generate_ci_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_sh
 # --- 2. SALES INVOICE GENERATOR ---
 def generate_si_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes, total_val, sig_bytes=None, signer_name="Dean Turner"):
     pdf = ProInvoice()
+    pdf.alias_nb_pages()
     pdf.add_page()
     pdf.set_auto_page_break(auto=False)
     
@@ -549,9 +553,10 @@ def generate_si_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes,
     
     return bytes(pdf.output())
 
-# --- 3. PACKING LIST GENERATOR (NEW) ---
+# --- 3. PACKING LIST GENERATOR ---
 def generate_pl_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, cartons):
     pdf = ProInvoice()
+    pdf.alias_nb_pages()
     pdf.add_page()
     pdf.set_auto_page_break(auto=False)
     
@@ -590,7 +595,6 @@ def generate_pl_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, carton
     pdf.set_x(x_right)
     pdf.set_font("Helvetica", '', 10)
     pdf.cell(40, 6, f"Date: {inv_date}", 0, 1, 'R')
-    # No Currency
     y_end_3 = pdf.get_y()
 
     # Row 2 (Bill To)
@@ -687,6 +691,7 @@ def generate_pl_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, carton
 # --- 4. PURCHASE ORDER GENERATOR ---
 def generate_po_pdf(df, inv_num, inv_date, addr_buyer, addr_vendor, addr_ship, total_val):
     pdf = ProInvoice()
+    pdf.alias_nb_pages()
     pdf.add_page()
     pdf.set_auto_page_break(auto=False)
     
@@ -819,7 +824,8 @@ def generate_po_pdf(df, inv_num, inv_date, addr_buyer, addr_vendor, addr_ship, t
 
 # --- BOL GENERATOR ---
 def generate_bol_pdf(df, inv_number, inv_date, shipper_txt, consignee_txt, carrier_pdf_display, hbol_number, pallets, cartons, total_weight_lbs, sig_bytes=None):
-    pdf = FPDF()
+    pdf = ProInvoice()
+    pdf.alias_nb_pages()
     for copy_num in range(2):
         pdf.add_page()
         pdf.set_auto_page_break(auto=False)
