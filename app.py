@@ -57,6 +57,7 @@ def save_invoice_metadata(inv_num, total_val, buyer):
             if num == inv_num: count += 1
             elif num.startswith(inv_num): count += 1
         
+        # No hyphen
         new_version_num = inv_num if count == 0 else f"{inv_num}{count}"
         
         est = pytz.timezone('US/Eastern')
@@ -227,7 +228,7 @@ class ProInvoice(FPDF):
 # --- 1. COMMERCIAL INVOICE GENERATOR ---
 def generate_ci_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes, total_val, sig_bytes=None, signer_name="Dean Turner"):
     pdf = ProInvoice()
-    pdf.alias_nb_pages() # Enables total page count
+    pdf.alias_nb_pages()
     pdf.add_page()
     pdf.set_auto_page_break(auto=False)
     
@@ -824,7 +825,7 @@ def generate_po_pdf(df, inv_num, inv_date, addr_buyer, addr_vendor, addr_ship, t
 
 # --- BOL GENERATOR ---
 def generate_bol_pdf(df, inv_number, inv_date, shipper_txt, consignee_txt, carrier_pdf_display, hbol_number, pallets, cartons, total_weight_lbs, sig_bytes=None):
-    pdf = ProInvoice()
+    pdf = FPDF()
     pdf.alias_nb_pages()
     for copy_num in range(2):
         pdf.add_page()
@@ -1106,7 +1107,7 @@ with tab_generate:
             st.markdown("#### Carrier Settings")
             
             # LOAD DEFAULT CARRIER FROM DB
-            carrier_options = ["FX (FedEx)", "GCYD (Green City)", "Other"]
+            carrier_options = ["FX (FedEx)", "GCYD (Green City Courier)", "Other"]
             saved_carrier_bytes = get_setting('default_carrier')
             default_idx = 0
             if saved_carrier_bytes:
@@ -1129,7 +1130,7 @@ with tab_generate:
                 carrier_pdf_display = "FedEx (FX)"
             elif "GCYD" in carrier_opt:
                 carrier_code = "GCYD"
-                carrier_pdf_display = "Green City Carrier (GCYD)"
+                carrier_pdf_display = "Green City Courier (GCYD)"
         
         with sig_col:
             st.markdown("#### Signature")
@@ -1311,7 +1312,7 @@ with tab_generate:
                 
                 with col_right:
                     st.subheader("📧 Email Center")
-                    with st.expander("⚙️ Sender Settings", expanded=False):
+                    with st.expander("⚙️ Sender Settings", expanded=True):
                         db_email = get_setting('smtp_email')
                         db_pass = get_setting('smtp_pass')
                         
