@@ -547,7 +547,7 @@ def generate_si_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes,
     pdf.ln(2)
     pdf.set_font("Helvetica", 'B', 9)
     pdf.set_x(10)
-    pdf.cell(sum(w[:-1]), 8, "TOTAL VALUE (USD):", 0, 0, 'R')
+    pdf.cell(sum(w[:-1]), 8, "TOTAL AMOUNT DUE (USD):", 0, 0, 'R')
     pdf.cell(w[-1], 8, f"${total_val:,.2f}", 1, 1, 'R')
     
     # --- NO SIGNATURE BLOCK FOR SALES INVOICE ---
