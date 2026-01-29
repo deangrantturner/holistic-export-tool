@@ -221,8 +221,8 @@ class ProInvoice(FPDF):
     def footer(self):
         pass
 
-# --- 1. COMMERCIAL INVOICE GENERATOR ---
-def generate_ci_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes, total_val, sig_bytes=None, signer_name="Dean Turner"):
+# --- STANDARD GENERATOR (For CI / PO) ---
+def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes, total_val, sig_bytes=None, signer_name="Dean Turner"):
     pdf = ProInvoice()
     pdf.add_page()
     pdf.set_auto_page_break(auto=False)
@@ -342,6 +342,7 @@ def generate_ci_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_sh
             (hts, 'C'), (fda, 'C'), (price, 'R'), (tot, 'R')
         ]
         
+        # Calculate Max Row Height using Pixel-Perfect Logic
         max_lines = 1
         for i, (txt, align) in enumerate(data_row):
             lines = get_lines_needed(txt, w[i] - 2) 
@@ -405,19 +406,22 @@ def generate_ci_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_sh
 
     return bytes(pdf.output())
 
-# --- 2. SALES INVOICE GENERATOR ---
-def generate_si_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, total_val, signer_name="Dean Turner"):
+# --- NEW: SALES INVOICE GENERATOR ---
+def generate_si_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes, total_val, sig_bytes=None, signer_name="Dean Turner"):
     pdf = ProInvoice()
     pdf.add_page()
     pdf.set_auto_page_break(auto=False)
     
+    # --- HEADER ---
     pdf.set_font('Helvetica', 'B', 20)
     pdf.cell(0, 10, "SALES INVOICE", 0, 1, 'C')
     pdf.ln(5)
 
+    # --- INFO BLOCKS ---
     pdf.set_font("Helvetica", '', 9)
     y_start = pdf.get_y()
     
+    # Column 1
     pdf.set_xy(10, y_start)
     pdf.set_font("Helvetica", 'B', 10)
     pdf.cell(70, 5, "SHIPPER / EXPORTER:", 0, 1)
@@ -426,6 +430,7 @@ def generate_si_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, total_
     pdf.multi_cell(70, 4, addr_from)
     y_end_1 = pdf.get_y()
 
+    # Column 2
     pdf.set_xy(90, y_start) 
     pdf.set_font("Helvetica", 'B', 10)
     pdf.cell(70, 5, "SHIP TO:", 0, 1)
@@ -434,9 +439,11 @@ def generate_si_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, total_
     pdf.multi_cell(70, 4, addr_ship)
     y_end_2 = pdf.get_y()
 
+    # Column 3
     x_right = 160
     pdf.set_xy(x_right, y_start)
     pdf.set_font("Helvetica", 'B', 12)
+    # UPDATED: Label Invoice #:
     pdf.cell(40, 6, f"Invoice #: {inv_num}", 0, 1, 'R')
     pdf.set_x(x_right)
     pdf.set_font("Helvetica", '', 10)
@@ -445,6 +452,7 @@ def generate_si_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, total_
     pdf.cell(40, 6, "Currency: USD", 0, 1, 'R')
     y_end_3 = pdf.get_y()
 
+    # Row 2 (Bill To only, no Notes Box)
     y_mid = max(y_end_1, y_end_2, y_end_3) + 10
     
     pdf.set_xy(10, y_mid)
@@ -456,6 +464,7 @@ def generate_si_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, total_
     
     pdf.set_y(y_mid + 35)
 
+    # --- TABLE HEADERS (Simplified) ---
     w = [20, 100, 35, 35] 
     headers = ["QTY", "PRODUCT", "UNIT ($)", "TOTAL ($)"]
     
@@ -465,11 +474,14 @@ def generate_si_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, total_
         pdf.cell(w[i], 8, h, 1, 0, 'C', fill=True)
     pdf.ln()
     
+    # --- HELPER: Exact Line Counter ---
     def get_lines_needed(text, width):
         if not text: return 1
         lines = 0
         for para in str(text).split('\n'):
-            if not para: lines += 1; continue
+            if not para:
+                lines += 1
+                continue
             words = para.split(' ')
             curr_w = 0
             lines_para = 1
@@ -483,6 +495,7 @@ def generate_si_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, total_
             lines += lines_para
         return lines
 
+    # --- DYNAMIC TABLE ROWS ---
     pdf.set_font("Helvetica", '', 7)
     line_h = 5
 
@@ -492,7 +505,9 @@ def generate_si_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, total_
         price = f"{row['Transfer Price (Unit)']:.2f}"
         tot = f"{row['Transfer Total']:.2f}"
         
-        data_row = [ (qty, 'C'), (prod_name, 'L'), (price, 'R'), (tot, 'R') ]
+        data_row = [
+            (qty, 'C'), (prod_name, 'L'), (price, 'R'), (tot, 'R')
+        ]
         
         max_lines = 1
         for i, (txt, align) in enumerate(data_row):
@@ -667,167 +682,170 @@ def generate_po_pdf(df, inv_num, inv_date, addr_buyer, addr_vendor, addr_ship, t
     return bytes(pdf.output())
 
 # --- BOL GENERATOR ---
-def generate_bol_pdf(df, inv_number, inv_date, shipper_txt, consignee_txt, carrier_name, hbol_number, pallets, cartons, total_weight_lbs, sig_bytes=None):
+def generate_bol_pdf(df, inv_number, inv_date, shipper_txt, consignee_txt, carrier_code, hbol_number, pallets, cartons, total_weight_lbs, sig_bytes=None):
     pdf = FPDF()
-    pdf.add_page()
-    pdf.set_auto_page_break(auto=False)
-    
-    pdf.set_font('Helvetica', 'B', 18)
-    pdf.cell(0, 10, "STRAIGHT BILL OF LADING", 0, 1, 'C')
-    pdf.ln(5)
-    
-    pdf.set_font("Helvetica", '', 10)
-    y_top = pdf.get_y()
-    
-    pdf.set_xy(10, y_top)
-    pdf.set_font("Helvetica", 'B', 10)
-    pdf.cell(20, 6, "Date:", 0, 0)
-    pdf.set_font("Helvetica", '', 10)
-    pdf.cell(40, 6, str(inv_date), 0, 0)
-    
-    pdf.set_font("Helvetica", 'B', 10)
-    pdf.cell(35, 6, "Invoice #:", 0, 0)
-    pdf.set_font("Helvetica", '', 10)
-    pdf.cell(40, 6, f"HRU{inv_number}", 0, 0)
-    
-    pdf.set_xy(130, y_top) 
-    pdf.set_font("Helvetica", 'B', 10)
-    pdf.cell(30, 6, "BOL #:", 0, 0, 'R')
-    pdf.set_font("Helvetica", '', 10)
-    pdf.cell(40, 6, hbol_number, 0, 1, 'R')
-    
-    pdf.ln(10)
-    
-    def get_lines_needed(text, width):
-        if not text: return 1
-        lines = 0
-        for para in str(text).split('\n'):
-            if not para: lines += 1; continue
-            words = para.split(' ')
-            curr_w = 0
-            lines_para = 1
-            for word in words:
-                word_w = pdf.get_string_width(word + " ")
-                if curr_w + word_w > width:
-                    lines_para += 1
-                    curr_w = word_w
-                else:
-                    curr_w += word_w
-            lines += lines_para
-        return lines
+    # LOOP FOR 2 COPIES
+    for copy_num in range(2):
+        pdf.add_page()
+        pdf.set_auto_page_break(auto=False)
+        
+        pdf.set_font('Helvetica', 'B', 18)
+        pdf.cell(0, 10, "STRAIGHT BILL OF LADING", 0, 1, 'C')
+        pdf.ln(5)
+        
+        pdf.set_font("Helvetica", '', 10)
+        y_top = pdf.get_y()
+        
+        pdf.set_xy(10, y_top)
+        pdf.set_font("Helvetica", 'B', 10)
+        pdf.cell(20, 6, "Date:", 0, 0)
+        pdf.set_font("Helvetica", '', 10)
+        pdf.cell(40, 6, str(inv_date), 0, 0)
+        
+        pdf.set_font("Helvetica", 'B', 10)
+        pdf.cell(35, 6, "Invoice #:", 0, 0)
+        pdf.set_font("Helvetica", '', 10)
+        pdf.cell(40, 6, f"HRUS{inv_number}", 0, 0)
+        
+        pdf.set_xy(130, y_top) 
+        pdf.set_font("Helvetica", 'B', 10)
+        pdf.cell(30, 6, "BOL #:", 0, 0, 'R')
+        pdf.set_font("Helvetica", '', 10)
+        pdf.cell(40, 6, hbol_number, 0, 1, 'R')
+        
+        pdf.ln(10)
+        
+        # Helper: Exact Line Counter
+        def get_lines_needed(text, width):
+            if not text: return 1
+            lines = 0
+            for para in str(text).split('\n'):
+                if not para: lines += 1; continue
+                words = para.split(' ')
+                curr_w = 0
+                lines_para = 1
+                for word in words:
+                    word_w = pdf.get_string_width(word + " ")
+                    if curr_w + word_w > width:
+                        lines_para += 1
+                        curr_w = word_w
+                    else:
+                        curr_w += word_w
+                lines += lines_para
+            return lines
 
-    y_addr = pdf.get_y()
-    
-    pdf.set_xy(10, y_addr)
-    pdf.set_font("Helvetica", 'B', 11)
-    pdf.cell(90, 6, "SHIP FROM (SHIPPER)", 1, 1, 'L', fill=False)
-    pdf.set_font("Helvetica", '', 9)
-    pdf.multi_cell(0, 5, shipper_txt, 1, 'L')
-    
-    pdf.ln(5)
-    
-    pdf.set_x(10)
-    pdf.set_font("Helvetica", 'B', 11)
-    pdf.cell(0, 6, "SHIP TO (CONSIGNEE)", 1, 1, 'L', fill=False)
-    pdf.set_font("Helvetica", '', 9)
-    pdf.multi_cell(0, 5, consignee_txt, 1, 'L')
-    
-    pdf.ln(5)
-    
-    pdf.set_font("Helvetica", 'B', 11)
-    pdf.cell(0, 6, f"CARRIER: {carrier_name}", 0, 1)
-    pdf.ln(5)
-    
-    w = [15, 25, 100, 30, 20] 
-    headers = ["HM", "QTY", "DESCRIPTION OF COMMODITY", "WEIGHT", "CLASS"]
-    
-    pdf.set_font("Helvetica", 'B', 9)
-    pdf.set_fill_color(220, 220, 220)
-    for i, h in enumerate(headers):
-        pdf.cell(w[i], 8, h, 1, 0, 'C', fill=True)
-    pdf.ln()
-    
-    def print_grid_row(data_list):
+        y_addr = pdf.get_y()
+        
+        pdf.set_xy(10, y_addr)
+        pdf.set_font("Helvetica", 'B', 11)
+        pdf.cell(90, 6, "SHIP FROM (SHIPPER)", 1, 1, 'L', fill=False)
         pdf.set_font("Helvetica", '', 9)
-        line_h = 5
-        max_lines = 1
+        pdf.multi_cell(0, 5, shipper_txt, 1, 'L')
         
-        for i, (txt, align) in enumerate(data_list):
-            lines = get_lines_needed(txt, w[i] - 2)
-            if lines > max_lines: max_lines = lines
+        pdf.ln(5)
         
-        row_h = max_lines * line_h
-        y_start = pdf.get_y()
-        x_start = 10
+        pdf.set_x(10)
+        pdf.set_font("Helvetica", 'B', 11)
+        pdf.cell(0, 6, "SHIP TO (CONSIGNEE)", 1, 1, 'L', fill=False)
+        pdf.set_font("Helvetica", '', 9)
+        pdf.multi_cell(0, 5, consignee_txt, 1, 'L')
         
-        for i, (txt, align) in enumerate(data_list):
-            current_x = x_start + sum(w[:i])
-            pdf.set_xy(current_x, y_start)
-            pdf.multi_cell(w[i], line_h, txt, 0, align)
+        pdf.ln(5)
+        
+        pdf.set_font("Helvetica", 'B', 11)
+        pdf.cell(0, 6, f"CARRIER: {carrier_code}", 0, 1)
+        pdf.ln(5)
+        
+        w = [15, 25, 100, 30, 20] 
+        headers = ["HM", "QTY", "DESCRIPTION OF COMMODITY", "WEIGHT", "CLASS"]
+        
+        pdf.set_font("Helvetica", 'B', 9)
+        pdf.set_fill_color(220, 220, 220)
+        for i, h in enumerate(headers):
+            pdf.cell(w[i], 8, h, 1, 0, 'C', fill=True)
+        pdf.ln()
+        
+        def print_grid_row(data_list):
+            pdf.set_font("Helvetica", '', 9)
+            line_h = 5
+            max_lines = 1
             
-        pdf.set_xy(x_start, y_start)
-        for i in range(len(w)):
-            current_x = x_start + sum(w[:i])
-            pdf.rect(current_x, y_start, w[i], row_h)
+            for i, (txt, align) in enumerate(data_list):
+                lines = get_lines_needed(txt, w[i] - 2)
+                if lines > max_lines: max_lines = lines
             
-        pdf.set_xy(x_start, y_start + row_h)
+            row_h = max_lines * line_h
+            y_start = pdf.get_y()
+            x_start = 10
+            
+            for i, (txt, align) in enumerate(data_list):
+                current_x = x_start + sum(w[:i])
+                pdf.set_xy(current_x, y_start)
+                pdf.multi_cell(w[i], line_h, txt, 0, align)
+                
+            pdf.set_xy(x_start, y_start)
+            for i in range(len(w)):
+                current_x = x_start + sum(w[:i])
+                pdf.rect(current_x, y_start, w[i], row_h)
+                
+            pdf.set_xy(x_start, y_start + row_h)
 
-    row1 = [
-        ("", 'C'),
-        (f"{pallets} PLT", 'C'),
-        ("ROASTED COFFEE (NMFC 056820)", 'L'),
-        (f"{total_weight_lbs:.1f} lbs", 'R'),
-        ("60", 'C')
-    ]
-    print_grid_row(row1)
-    
-    row2 = [
-        ("", 'C'),
-        (f"{cartons} CTN", 'C'),
-        ("(Contains roasted coffee in bags)", 'L'),
-        ("", 'R'),
-        ("", 'C')
-    ]
-    print_grid_row(row2)
-    
-    pdf.ln(10)
-    
-    pdf.set_font("Helvetica", '', 8)
-    legal = ("RECEIVED, subject to the classifications and tariffs in effect on the date of the issue of this Bill of Lading, "
-             "the property described above in apparent good order, except as noted (contents and condition of contents of packages unknown), "
-             "marked, consigned, and destined as indicated above which said carrier (the word carrier being understood throughout this contract "
-             "as meaning any person or corporation in possession of the property under the contract) agrees to carry to its usual place of delivery "
-             "at said destination.")
-    pdf.multi_cell(0, 4, legal)
-    
-    pdf.ln(15)
-    
-    y_sig = pdf.get_y()
-    
-    pdf.line(10, y_sig, 90, y_sig)   # Shipper Line
-    pdf.line(110, y_sig, 190, y_sig) # Carrier Line
-    
-    pdf.set_font("Helvetica", 'B', 8)
-    pdf.set_xy(10, y_sig + 2)
-    pdf.cell(80, 4, "SHIPPER SIGNATURE / DATE", 0, 0)
-    
-    pdf.set_xy(110, y_sig + 2)
-    pdf.cell(80, 4, "CARRIER SIGNATURE / DATE", 0, 1)
-    
-    if sig_bytes:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp:
-            tmp.write(sig_bytes)
-            tmp_path = tmp.name
-        try:
-            pdf.image(tmp_path, x=15, y=y_sig-15, w=35) 
-        except:
-            pass
-        os.unlink(tmp_path)
+        row1 = [
+            ("", 'C'),
+            (f"{pallets} PLT", 'C'),
+            ("ROASTED COFFEE (NMFC 056820)", 'L'),
+            (f"{total_weight_lbs:.1f} lbs", 'R'),
+            ("60", 'C')
+        ]
+        print_grid_row(row1)
+        
+        row2 = [
+            ("", 'C'),
+            (f"{cartons} CTN", 'C'),
+            ("(Contains roasted coffee in bags)", 'L'),
+            ("", 'R'),
+            ("", 'C')
+        ]
+        print_grid_row(row2)
+        
+        pdf.ln(10)
+        
+        pdf.set_font("Helvetica", '', 8)
+        legal = ("RECEIVED, subject to the classifications and tariffs in effect on the date of the issue of this Bill of Lading, "
+                 "the property described above in apparent good order, except as noted (contents and condition of contents of packages unknown), "
+                 "marked, consigned, and destined as indicated above which said carrier (the word carrier being understood throughout this contract "
+                 "as meaning any person or corporation in possession of the property under the contract) agrees to carry to its usual place of delivery "
+                 "at said destination.")
+        pdf.multi_cell(0, 4, legal)
+        
+        pdf.ln(15)
+        
+        y_sig = pdf.get_y()
+        
+        pdf.line(10, y_sig, 90, y_sig)   # Shipper Line
+        pdf.line(110, y_sig, 190, y_sig) # Carrier Line
+        
+        pdf.set_font("Helvetica", 'B', 8)
+        pdf.set_xy(10, y_sig + 2)
+        pdf.cell(80, 4, "SHIPPER SIGNATURE / DATE", 0, 0)
+        
+        pdf.set_xy(110, y_sig + 2)
+        pdf.cell(80, 4, "CARRIER SIGNATURE / DATE", 0, 1)
+        
+        if sig_bytes:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp:
+                tmp.write(sig_bytes)
+                tmp_path = tmp.name
+            try:
+                pdf.image(tmp_path, x=15, y=y_sig-15, w=35) 
+            except:
+                pass
+            os.unlink(tmp_path)
     
     return bytes(pdf.output())
 
 # --- CUSTOMSCITY CSV GENERATOR ---
-def generate_customscity_csv(df, inv_number, inv_date, ship_to_txt, hbol_number):
+def generate_customscity_csv(df, inv_number, inv_date, ship_to_txt, hbol_number, carrier_code):
     lines = ship_to_txt.split('\n')
     c_name = lines[0].strip() if len(lines) > 0 else ""
     c_addr = lines[1].strip() if len(lines) > 1 else ""
@@ -883,7 +901,7 @@ def generate_customscity_csv(df, inv_number, inv_date, ship_to_txt, hbol_number)
             'Consignee Country': c_country,
             'Description': row['Description'],
             'Product ID': row['Variant code / SKU'],
-            'Carrier Name': 'FX',
+            'Carrier Name': carrier_code,
             'Vessel Name': '',
             'Voyage Trip Flight Number': hbol_number,
             'Rail Car Number': ''
@@ -908,9 +926,18 @@ with tab_generate:
             notes_txt = st.text_area("Notes / Broker", value=DEFAULT_NOTES, height=100)
 
         st.markdown("---")
-        st.markdown("#### Signature Settings")
-        sig_col_a, sig_col_b = st.columns(2)
-        with sig_col_a:
+        # CARRIER SELECTION
+        carrier_col, sig_col = st.columns(2)
+        with carrier_col:
+            st.markdown("#### Carrier Settings")
+            carrier_opt = st.selectbox("Select Carrier", ["FX (FedEx)", "GCYD (Green City)", "Other"])
+            if carrier_opt == "Other":
+                carrier_code = st.text_input("Enter Custom Carrier Code")
+            else:
+                carrier_code = carrier_opt.split(' ')[0] # Extract FX or GCYD
+        
+        with sig_col:
+            st.markdown("#### Signature")
             signer_name = st.text_input("Signatory Name", value="Dean Turner")
             saved_sig_bytes = get_signature()
             if saved_sig_bytes:
@@ -923,14 +950,13 @@ with tab_generate:
                     st.rerun()
             else:
                 st.warning("⚠️ No signature")
-        with sig_col_b:
-            sig_upload = st.file_uploader("Upload New (PNG/JPG)", type=['png', 'jpg', 'jpeg'], key="sig_upl")
-            if sig_upload:
-                bytes_data = sig_upload.getvalue()
-                save_signature(bytes_data)
-                st.success("Saved!")
-                st.rerun()
-        final_sig_bytes = saved_sig_bytes if saved_sig_bytes else (sig_upload.getvalue() if sig_upload else None)
+                sig_upload = st.file_uploader("Upload New (PNG/JPG)", type=['png', 'jpg', 'jpeg'], key="sig_upl")
+                if sig_upload:
+                    bytes_data = sig_upload.getvalue()
+                    save_signature(bytes_data)
+                    st.success("Saved!")
+                    st.rerun()
+        final_sig_bytes = saved_sig_bytes if saved_sig_bytes else None
 
     st.subheader("Upload Orders")
     
@@ -1034,10 +1060,13 @@ with tab_generate:
 
                 # --- GENERATE FILES ---
                 base_id = inv_number
-                ci_id = f"CI-HRU{base_id}"
-                si_id = f"SI-HRU{base_id}"
-                po_id = f"PO-HRU{base_id}"
-                bol_id = f"BOL-HRU{base_id}"
+                ci_id = f"CI-HRUS{base_id}"
+                si_id = f"SI-HRUS{base_id}"
+                po_id = f"PO-HRUS{base_id}"
+                bol_id = f"BOL-HRUS{base_id}"
+                
+                # Using HRUS base for tracking in CSV
+                hbol_clean = f"HRUS{base_id}"
                 
                 pdf_ci = generate_ci_pdf("COMMERCIAL INVOICE", edited_df, ci_id, inv_date, 
                                       shipper_txt, importer_txt, consignee_txt, notes_txt, total_val, final_sig_bytes, signer_name)
@@ -1048,9 +1077,10 @@ with tab_generate:
                 pdf_si = generate_si_pdf(edited_df, si_id, inv_date, 
                                       shipper_txt, importer_txt, consignee_txt, notes_txt, total_val, final_sig_bytes, signer_name)
                 
-                pdf_bol = generate_bol_pdf(edited_df, inv_number, inv_date, shipper_txt, consignee_txt, "FX", bol_id, pallets, cartons, gross_weight, final_sig_bytes)
+                pdf_bol = generate_bol_pdf(edited_df, inv_number, inv_date, shipper_txt, consignee_txt, carrier_code, bol_id, pallets, cartons, gross_weight, final_sig_bytes)
                 
-                csv_customs = generate_customscity_csv(edited_df, inv_number, inv_date, consignee_txt, bol_id)
+                # Pass Carrier Code to CSV
+                csv_customs = generate_customscity_csv(edited_df, inv_number, inv_date, consignee_txt, hbol_clean, carrier_code)
 
                 st.session_state['current_pdfs'] = {
                     'ci': pdf_ci, 'po': pdf_po, 'si': pdf_si, 'bol': pdf_bol,
