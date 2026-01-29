@@ -57,6 +57,7 @@ def save_invoice_metadata(inv_num, total_val, buyer):
             if num == inv_num: count += 1
             elif num.startswith(inv_num): count += 1
         
+        # No hyphen
         new_version_num = inv_num if count == 0 else f"{inv_num}{count}"
         
         est = pytz.timezone('US/Eastern')
@@ -1095,9 +1096,26 @@ with tab_generate:
         with c2:
             shipper_txt = st.text_area("Shipper / Exporter", value=DEFAULT_SHIPPER, height=120)
             importer_txt = st.text_area("Importer (Bill To)", value=DEFAULT_IMPORTER, height=100)
+        
+        # LOAD DEFAULTS FOR C3
+        saved_cons = get_setting('default_consignee')
+        active_consignee = saved_cons.decode('utf-8') if saved_cons else DEFAULT_CONSIGNEE
+        
+        saved_notes_db = get_setting('default_notes')
+        active_notes = saved_notes_db.decode('utf-8') if saved_notes_db else DEFAULT_NOTES
+
         with c3:
-            consignee_txt = st.text_area("Consignee (Ship To)", value=DEFAULT_CONSIGNEE, height=120)
-            notes_txt = st.text_area("Notes / Broker", value=DEFAULT_NOTES, height=100)
+            consignee_txt = st.text_area("Consignee (Ship To)", value=active_consignee, height=120)
+            if st.button("💾 Save Consignee as Default", key="save_cons_btn"):
+                save_setting('default_consignee', consignee_txt.encode('utf-8'))
+                st.success("Default Saved!")
+            
+            st.divider() # Visual separation
+            
+            notes_txt = st.text_area("Notes / Broker", value=active_notes, height=100)
+            if st.button("💾 Save Notes as Default", key="save_notes_btn"):
+                save_setting('default_notes', notes_txt.encode('utf-8'))
+                st.success("Default Saved!")
 
         st.markdown("---")
         # CARRIER SELECTION
