@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import sqlite3
 from fpdf import FPDF
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 import io
 import re
 import tempfile
@@ -57,7 +57,6 @@ def save_invoice_metadata(inv_num, total_val, buyer):
             if num == inv_num: count += 1
             elif num.startswith(inv_num): count += 1
         
-        # No hyphen, just append count if duplicate
         new_version_num = inv_num if count == 0 else f"{inv_num}{count}"
         
         est = pytz.timezone('US/Eastern')
@@ -343,6 +342,7 @@ def generate_ci_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_sh
             (hts, 'C'), (fda, 'C'), (price, 'R'), (tot, 'R')
         ]
         
+        # Calculate Max Row Height using Pixel-Perfect Logic
         max_lines = 1
         for i, (txt, align) in enumerate(data_row):
             lines = get_lines_needed(txt, w[i] - 2) 
@@ -879,6 +879,17 @@ def generate_customscity_csv(df, inv_number, inv_date, ship_to_txt, hbol_number,
             if len(state_zip) >= 1: c_state = state_zip[0]
             if len(state_zip) >= 2: c_zip = state_zip[1]
 
+    # CALCULATE NEXT BUSINESS DAY
+    weekday = inv_date.weekday() # Mon=0, Sun=6
+    if weekday == 4: # Friday -> Monday
+        days_to_add = 3
+    elif weekday == 5: # Saturday -> Monday
+        days_to_add = 2
+    else: # Sun-Thurs -> Next Day
+        days_to_add = 1
+    
+    est_arrival = inv_date + timedelta(days=days_to_add)
+
     columns = [
         'Entry Type', 'Reference Qualifier', 'Reference Number', 'Mode of Transport', 
         'Bill Type', 'MBOL/TRIP Number', 'HBOL/ Shipment Control Number', 
@@ -892,6 +903,11 @@ def generate_customscity_csv(df, inv_number, inv_date, ship_to_txt, hbol_number,
     
     rows = []
     for _, row in df.iterrows():
+        # EXCLUDE ROW IF FDA CODE IS MISSING
+        fda = str(row.get('FDA Code', '')).strip()
+        if not fda or fda.lower() == 'nan':
+            continue
+
         rows.append({
             'Entry Type': '01',
             'Reference Qualifier': 'BOL',
@@ -900,7 +916,7 @@ def generate_customscity_csv(df, inv_number, inv_date, ship_to_txt, hbol_number,
             'Bill Type': 'R',
             'MBOL/TRIP Number': hbol_number,
             'HBOL/ Shipment Control Number': hbol_number,
-            'Estimate Date of Arrival': inv_date.strftime('%Y%m%d'),
+            'Estimate Date of Arrival': est_arrival.strftime('%Y%m%d'),
             'Time of Arrival': '18:00',
             'US Port of Arrival': '0712',
             'Equipment Number': '',
@@ -928,6 +944,7 @@ with tab_generate:
     with st.expander("📝 Invoice Details, Addresses & Signature", expanded=True):
         c1, c2, c3 = st.columns(3)
         with c1:
+            # REMOVED HYPHEN IN DEFAULT
             default_id = f"{date.today().strftime('%Y%m%d')}1"
             inv_number = st.text_input("Daily Batch # (e.g., YYYYMMDD1)", value=default_id)
             inv_date = st.date_input("Date", value=date.today())
@@ -1085,6 +1102,7 @@ with tab_generate:
                 po_id = f"PO-HRUS{base_id}"
                 bol_id = f"BOL-HRUS{base_id}"
                 
+                # Using HRUS base for tracking in CSV
                 hbol_clean = f"HRUS{base_id}"
                 
                 pdf_ci = generate_ci_pdf("COMMERCIAL INVOICE", edited_df, ci_id, inv_date, 
