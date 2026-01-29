@@ -546,8 +546,6 @@ def generate_si_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes,
     pdf.cell(sum(w[:-1]), 8, "TOTAL AMOUNT DUE (USD):", 0, 0, 'R')
     pdf.cell(w[-1], 8, f"${total_val:,.2f}", 1, 1, 'R')
     
-    # --- NO SIGNATURE BLOCK FOR SALES INVOICE ---
-    
     return bytes(pdf.output())
 
 # --- 3. PURCHASE ORDER GENERATOR ---
@@ -684,7 +682,7 @@ def generate_po_pdf(df, inv_num, inv_date, addr_buyer, addr_vendor, addr_ship, t
     return bytes(pdf.output())
 
 # --- BOL GENERATOR ---
-def generate_bol_pdf(df, inv_number, inv_date, shipper_txt, consignee_txt, carrier_name, hbol_number, pallets, cartons, total_weight_lbs, sig_bytes=None):
+def generate_bol_pdf(df, inv_number, inv_date, shipper_txt, consignee_txt, carrier_code, hbol_number, pallets, cartons, total_weight_lbs, sig_bytes=None):
     pdf = FPDF()
     for copy_num in range(2):
         pdf.add_page()
@@ -703,10 +701,7 @@ def generate_bol_pdf(df, inv_number, inv_date, shipper_txt, consignee_txt, carri
         pdf.set_font("Helvetica", '', 10)
         pdf.cell(40, 6, str(inv_date), 0, 0)
         
-        pdf.set_font("Helvetica", 'B', 10)
-        pdf.cell(35, 6, "Invoice #:", 0, 0)
-        pdf.set_font("Helvetica", '', 10)
-        pdf.cell(40, 6, f"HRUS{inv_number}", 0, 0)
+        # INVOICE # REMOVED PER REQUEST
         
         pdf.set_xy(130, y_top) 
         pdf.set_font("Helvetica", 'B', 10)
@@ -754,7 +749,7 @@ def generate_bol_pdf(df, inv_number, inv_date, shipper_txt, consignee_txt, carri
         pdf.ln(5)
         
         pdf.set_font("Helvetica", 'B', 11)
-        pdf.cell(0, 6, f"CARRIER: {carrier_name}", 0, 1)
+        pdf.cell(0, 6, f"CARRIER: {carrier_code}", 0, 1)
         pdf.ln(5)
         
         w = [15, 25, 100, 30, 20] 
@@ -1071,7 +1066,6 @@ with tab_generate:
                 po_id = f"PO-HRUS{base_id}"
                 bol_id = f"BOL-HRUS{base_id}"
                 
-                # Using HRUS base for tracking in CSV
                 hbol_clean = f"HRUS{base_id}"
                 
                 pdf_ci = generate_ci_pdf("COMMERCIAL INVOICE", edited_df, ci_id, inv_date, 
@@ -1083,10 +1077,8 @@ with tab_generate:
                 pdf_si = generate_si_pdf(edited_df, si_id, inv_date, 
                                       shipper_txt, importer_txt, consignee_txt, notes_txt, total_val, final_sig_bytes, signer_name)
                 
-                # Pass carrier_pdf_display for visual
                 pdf_bol = generate_bol_pdf(edited_df, inv_number, inv_date, shipper_txt, consignee_txt, carrier_pdf_display, bol_id, pallets, cartons, gross_weight, final_sig_bytes)
                 
-                # Pass carrier_code for CSV
                 csv_customs = generate_customscity_csv(edited_df, inv_number, inv_date, consignee_txt, hbol_clean, carrier_code)
 
                 st.session_state['current_pdfs'] = {
