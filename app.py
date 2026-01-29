@@ -501,6 +501,7 @@ def generate_si_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes,
     for _, row in df.iterrows():
         qty = str(int(row['Quantity']))
         prod_name = str(row['Product Name'])
+        # No Description, HTS, FDA
         price = f"{row['Transfer Price (Unit)']:.2f}"
         tot = f"{row['Transfer Total']:.2f}"
         
@@ -544,6 +545,8 @@ def generate_si_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes,
     pdf.set_x(10)
     pdf.cell(sum(w[:-1]), 8, "TOTAL AMOUNT DUE (USD):", 0, 0, 'R')
     pdf.cell(w[-1], 8, f"${total_val:,.2f}", 1, 1, 'R')
+    
+    # --- NO SIGNATURE BLOCK FOR SALES INVOICE ---
     
     return bytes(pdf.output())
 
@@ -681,7 +684,7 @@ def generate_po_pdf(df, inv_num, inv_date, addr_buyer, addr_vendor, addr_ship, t
     return bytes(pdf.output())
 
 # --- BOL GENERATOR ---
-def generate_bol_pdf(df, inv_number, inv_date, shipper_txt, consignee_txt, carrier_code, hbol_number, pallets, cartons, total_weight_lbs, sig_bytes=None):
+def generate_bol_pdf(df, inv_number, inv_date, shipper_txt, consignee_txt, carrier_name, hbol_number, pallets, cartons, total_weight_lbs, sig_bytes=None):
     pdf = FPDF()
     for copy_num in range(2):
         pdf.add_page()
@@ -751,7 +754,7 @@ def generate_bol_pdf(df, inv_number, inv_date, shipper_txt, consignee_txt, carri
         pdf.ln(5)
         
         pdf.set_font("Helvetica", 'B', 11)
-        pdf.cell(0, 6, f"CARRIER: {carrier_code}", 0, 1)
+        pdf.cell(0, 6, f"CARRIER: {carrier_name}", 0, 1)
         pdf.ln(5)
         
         w = [15, 25, 100, 30, 20] 
@@ -931,8 +934,13 @@ with tab_generate:
             carrier_opt = st.selectbox("Select Carrier", ["FX (FedEx)", "GCYD (Green City)", "Other"])
             if carrier_opt == "Other":
                 carrier_code = st.text_input("Enter Custom Carrier Code")
-            else:
-                carrier_code = carrier_opt.split(' ')[0] # Extract FX or GCYD
+                carrier_pdf_display = carrier_code
+            elif "FX" in carrier_opt:
+                carrier_code = "FX"
+                carrier_pdf_display = "FedEx (FX)"
+            elif "GCYD" in carrier_opt:
+                carrier_code = "GCYD"
+                carrier_pdf_display = "Green City Carrier (GCYD)"
         
         with sig_col:
             st.markdown("#### Signature")
@@ -1075,9 +1083,10 @@ with tab_generate:
                 pdf_si = generate_si_pdf(edited_df, si_id, inv_date, 
                                       shipper_txt, importer_txt, consignee_txt, notes_txt, total_val, final_sig_bytes, signer_name)
                 
-                pdf_bol = generate_bol_pdf(edited_df, inv_number, inv_date, shipper_txt, consignee_txt, carrier_code, bol_id, pallets, cartons, gross_weight, final_sig_bytes)
+                # Pass carrier_pdf_display for visual
+                pdf_bol = generate_bol_pdf(edited_df, inv_number, inv_date, shipper_txt, consignee_txt, carrier_pdf_display, bol_id, pallets, cartons, gross_weight, final_sig_bytes)
                 
-                # Pass Carrier Code to CSV
+                # Pass carrier_code for CSV
                 csv_customs = generate_customscity_csv(edited_df, inv_number, inv_date, consignee_txt, hbol_clean, carrier_code)
 
                 st.session_state['current_pdfs'] = {
