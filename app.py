@@ -57,7 +57,6 @@ def save_invoice_metadata(inv_num, total_val, buyer):
             if num == inv_num: count += 1
             elif num.startswith(inv_num): count += 1
         
-        # No hyphen
         new_version_num = inv_num if count == 0 else f"{inv_num}{count}"
         
         est = pytz.timezone('US/Eastern')
@@ -1107,6 +1106,7 @@ with tab_generate:
             st.markdown("#### Carrier Settings")
             
             # LOAD DEFAULT CARRIER FROM DB
+            # UPDATED: "Green City Courier"
             carrier_options = ["FX (FedEx)", "GCYD (Green City Courier)", "Other"]
             saved_carrier_bytes = get_setting('default_carrier')
             default_idx = 0
@@ -1200,9 +1200,11 @@ with tab_generate:
                 
                 processed['Discount_Float'] = processed['Discount'].astype(str).str.replace('%', '', regex=False)
                 processed['Discount_Float'] = pd.to_numeric(processed['Discount_Float'], errors='coerce').fillna(0) / 100.0
-                processed['Original_Retail'] = processed.apply(
-                    lambda row: row['Price per unit'] / (1 - row['Discount_Float']) if row['Discount_Float'] < 1.0 else 0, axis=1
-                )
+                
+                # FIXED LOGIC: Price per unit IS the Original Retail.
+                processed['Price per unit'] = pd.to_numeric(processed['Price per unit'], errors='coerce').fillna(0)
+                processed['Original_Retail'] = processed['Price per unit']
+                
                 app_discount_decimal = discount_rate / 100.0
                 processed['Transfer Price (Unit)'] = processed['Original_Retail'] * (1 - app_discount_decimal)
                 processed['Transfer Total'] = processed['Quantity'] * processed['Transfer Price (Unit)']
@@ -1311,6 +1313,7 @@ with tab_generate:
                     )
                 
                 with col_right:
+                    # EXPANDED BY DEFAULT
                     st.subheader("📧 Email Center")
                     with st.expander("⚙️ Sender Settings", expanded=True):
                         db_email = get_setting('smtp_email')
