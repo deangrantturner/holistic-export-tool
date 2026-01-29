@@ -345,6 +345,7 @@ def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship,
             (hts, 'C'), (fda, 'C'), (price, 'R'), (tot, 'R')
         ]
         
+        # Calculate Max Row Height using Pixel-Perfect Logic
         max_lines = 1
         for i, (txt, align) in enumerate(data_row):
             lines = get_lines_needed(txt, w[i] - 2) 
@@ -408,7 +409,7 @@ def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship,
 
     return bytes(pdf.output())
 
-# --- NEW: SALES INVOICE GENERATOR (SIMPLIFIED) ---
+# --- NEW: SALES INVOICE GENERATOR (SIMPLIFIED & NO SIGNATURE) ---
 def generate_si_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes, total_val, sig_bytes=None, signer_name="Dean Turner"):
     pdf = ProInvoice()
     pdf.add_page()
@@ -466,6 +467,7 @@ def generate_si_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes,
     pdf.set_y(y_mid + 35)
 
     # --- TABLE HEADERS (Simplified) ---
+    # Widths: QTY, PRODUCT, UNIT, TOTAL
     w = [20, 100, 35, 35] 
     headers = ["QTY", "PRODUCT", "UNIT ($)", "TOTAL ($)"]
     
@@ -503,6 +505,7 @@ def generate_si_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes,
     for _, row in df.iterrows():
         qty = str(int(row['Quantity']))
         prod_name = str(row['Product Name'])
+        # No Description, HTS, FDA
         price = f"{row['Transfer Price (Unit)']:.2f}"
         tot = f"{row['Transfer Total']:.2f}"
         
@@ -547,30 +550,8 @@ def generate_si_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes,
     pdf.cell(sum(w[:-1]), 8, "TOTAL VALUE (USD):", 0, 0, 'R')
     pdf.cell(w[-1], 8, f"${total_val:,.2f}", 1, 1, 'R')
     
-    # --- SIGNATURE BLOCK ---
-    pdf.ln(10)
-    if pdf.get_y() > 250: pdf.add_page()
+    # --- NO SIGNATURE BLOCK FOR SALES INVOICE ---
     
-    pdf.set_font("Helvetica", '', 10)
-    pdf.cell(0, 5, "I declare that all information contained in this invoice to be true and correct.", 0, 1, 'L')
-    pdf.ln(5)
-    
-    if sig_bytes:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp:
-            tmp.write(sig_bytes)
-            tmp_path = tmp.name
-        try:
-            pdf.image(tmp_path, w=40)
-        except:
-            pdf.cell(0, 5, "[Signature Error]", 0, 1)
-        os.unlink(tmp_path)
-    else:
-        pdf.ln(15)
-    
-    pdf.ln(2)
-    pdf.set_font("Helvetica", 'B', 10)
-    pdf.cell(0, 5, signer_name, 0, 1, 'L')
-
     return bytes(pdf.output())
 
 # --- BOL GENERATOR ---
