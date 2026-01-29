@@ -207,7 +207,7 @@ DEFAULT_IMPORTER = """Holistic Roasters USA
 Sheridan, WY 82801
 IRS/EIN: 32-082713200"""
 
-DEFAULT_NOTES = """CUSTOMS BROKER: Strix
+DEFAULT_NOTES = """CUSTOMS BROKER: Strix (Entry@strixsmart.com)
 HOLISTIC ROASTERS inc. Canada FDA #: 11638755492
 - ALL PRICES IN USD
 - Incoterms: EXW"""
@@ -261,7 +261,8 @@ def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship,
     x_right = 160
     pdf.set_xy(x_right, y_start)
     pdf.set_font("Helvetica", 'B', 12)
-    pdf.cell(40, 6, f"Ref #: {inv_num}", 0, 1, 'R')
+    # UPDATED: Label Invoice #:
+    pdf.cell(40, 6, f"Invoice #: {inv_num}", 0, 1, 'R')
     pdf.set_x(x_right)
     pdf.set_font("Helvetica", '', 10)
     pdf.cell(40, 6, f"Date: {inv_date}", 0, 1, 'R')
@@ -345,7 +346,6 @@ def generate_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship,
             (hts, 'C'), (fda, 'C'), (price, 'R'), (tot, 'R')
         ]
         
-        # Calculate Max Row Height using Pixel-Perfect Logic
         max_lines = 1
         for i, (txt, align) in enumerate(data_row):
             lines = get_lines_needed(txt, w[i] - 2) 
@@ -446,7 +446,8 @@ def generate_si_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes,
     x_right = 160
     pdf.set_xy(x_right, y_start)
     pdf.set_font("Helvetica", 'B', 12)
-    pdf.cell(40, 6, f"Ref #: {inv_num}", 0, 1, 'R')
+    # UPDATED: Label Invoice #:
+    pdf.cell(40, 6, f"Invoice #: {inv_num}", 0, 1, 'R')
     pdf.set_x(x_right)
     pdf.set_font("Helvetica", '', 10)
     pdf.cell(40, 6, f"Date: {inv_date}", 0, 1, 'R')
@@ -467,7 +468,6 @@ def generate_si_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes,
     pdf.set_y(y_mid + 35)
 
     # --- TABLE HEADERS (Simplified) ---
-    # Widths: QTY, PRODUCT, UNIT, TOTAL
     w = [20, 100, 35, 35] 
     headers = ["QTY", "PRODUCT", "UNIT ($)", "TOTAL ($)"]
     
@@ -505,7 +505,6 @@ def generate_si_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes,
     for _, row in df.iterrows():
         qty = str(int(row['Quantity']))
         prod_name = str(row['Product Name'])
-        # No Description, HTS, FDA
         price = f"{row['Transfer Price (Unit)']:.2f}"
         tot = f"{row['Transfer Total']:.2f}"
         
@@ -550,8 +549,6 @@ def generate_si_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes,
     pdf.cell(sum(w[:-1]), 8, "TOTAL AMOUNT DUE (USD):", 0, 0, 'R')
     pdf.cell(w[-1], 8, f"${total_val:,.2f}", 1, 1, 'R')
     
-    # --- NO SIGNATURE BLOCK FOR SALES INVOICE ---
-    
     return bytes(pdf.output())
 
 # --- BOL GENERATOR ---
@@ -574,9 +571,11 @@ def generate_bol_pdf(df, inv_number, inv_date, shipper_txt, consignee_txt, carri
     pdf.cell(40, 6, str(inv_date), 0, 0)
     
     pdf.set_font("Helvetica", 'B', 10)
-    pdf.cell(35, 6, "Customer Order #:", 0, 0)
+    # UPDATED: Invoice #:
+    pdf.cell(35, 6, "Invoice #:", 0, 0)
     pdf.set_font("Helvetica", '', 10)
-    pdf.cell(40, 6, inv_number, 0, 0)
+    # UPDATED: Reference HRU...
+    pdf.cell(40, 6, f"HRU{inv_number}", 0, 0)
     
     pdf.set_xy(130, y_top) 
     pdf.set_font("Helvetica", 'B', 10)
@@ -786,9 +785,11 @@ with tab_generate:
     with st.expander("📝 Invoice Details, Addresses & Signature", expanded=True):
         c1, c2, c3 = st.columns(3)
         with c1:
-            inv_number = st.text_input("Invoice #", value=f"INV-{date.today().strftime('%Y%m%d')}")
+            # UPDATED: Default ID to Date-Counter
+            default_id = f"{date.today().strftime('%Y%m%d')}-1"
+            inv_number = st.text_input("Daily Batch # (e.g., YYYYMMDD-1)", value=default_id)
             inv_date = st.date_input("Date", value=date.today())
-            discount_rate = st.number_input("Target Transfer Discount %", min_value=0.0, max_value=100.0, value=50.0, step=0.1, format="%.1f")
+            discount_rate = st.number_input("Target Transfer Discount %", min_value=0.0, max_value=100.0, value=75.0, step=0.1, format="%.1f")
             
         with c2:
             shipper_txt = st.text_area("Shipper / Exporter", value=DEFAULT_SHIPPER, height=120)
@@ -923,20 +924,24 @@ with tab_generate:
                     gross_weight = st.number_input("Total Gross Weight (lbs)", min_value=0.0, value=calc_weight + (pallets * 40), step=1.0)
 
                 # --- GENERATE FILES ---
-                unique_suffix = str(random.randint(10000000, 99999999))
-                hbol_number = f"HRUS{unique_suffix}"
+                # Generate Document IDs with HRU Prefix
+                base_id = inv_number
+                ci_id = f"CI-HRU{base_id}"
+                si_id = f"SI-HRU{base_id}"
+                po_id = f"PO-HRU{base_id}"
+                bol_id = f"BOL-HRU{base_id}"
                 
-                pdf_ci = generate_pdf("COMMERCIAL INVOICE", edited_df, inv_number, inv_date, 
+                pdf_ci = generate_pdf("COMMERCIAL INVOICE", edited_df, ci_id, inv_date, 
                                       shipper_txt, importer_txt, consignee_txt, notes_txt, total_val, final_sig_bytes, signer_name)
-                pdf_po = generate_pdf("PURCHASE ORDER", edited_df, inv_number, inv_date, 
+                pdf_po = generate_pdf("PURCHASE ORDER", edited_df, po_id, inv_date, 
                                       importer_txt, shipper_txt, consignee_txt, notes_txt, total_val, final_sig_bytes, signer_name)
                 
-                pdf_si = generate_si_pdf(edited_df, inv_number, inv_date, 
+                pdf_si = generate_si_pdf(edited_df, si_id, inv_date, 
                                       shipper_txt, importer_txt, consignee_txt, notes_txt, total_val, final_sig_bytes, signer_name)
                 
-                pdf_bol = generate_bol_pdf(edited_df, inv_number, inv_date, shipper_txt, consignee_txt, "FX", hbol_number, pallets, cartons, gross_weight, final_sig_bytes)
+                pdf_bol = generate_bol_pdf(edited_df, inv_number, inv_date, shipper_txt, consignee_txt, "FX", bol_id, pallets, cartons, gross_weight, final_sig_bytes)
                 
-                csv_customs = generate_customscity_csv(edited_df, inv_number, inv_date, consignee_txt, hbol_number)
+                csv_customs = generate_customscity_csv(edited_df, inv_number, inv_date, consignee_txt, bol_id)
 
                 st.session_state['current_pdfs'] = {
                     'ci': pdf_ci, 'po': pdf_po, 'si': pdf_si, 'bol': pdf_bol,
@@ -950,10 +955,10 @@ with tab_generate:
                 with col_left:
                     st.subheader("🖨️ Downloads")
                     c_pdf1, c_pdf2, c_pdf3, c_pdf4 = st.columns(4)
-                    with c_pdf1: st.download_button("📄 Commercial", pdf_ci, f"CI-{inv_number}.pdf", "application/pdf")
-                    with c_pdf2: st.download_button("📄 Purch. Order", pdf_po, f"PO-{inv_number}.pdf", "application/pdf")
-                    with c_pdf3: st.download_button("📄 Sales Inv.", pdf_si, f"SI-{inv_number}.pdf", "application/pdf")
-                    with c_pdf4: st.download_button("🚛 Bill of Lading", pdf_bol, f"BOL-{inv_number}.pdf", "application/pdf")
+                    with c_pdf1: st.download_button("📄 Commercial", pdf_ci, f"{ci_id}.pdf", "application/pdf")
+                    with c_pdf2: st.download_button("📄 Purch. Order", pdf_po, f"{po_id}.pdf", "application/pdf")
+                    with c_pdf3: st.download_button("📄 Sales Inv.", pdf_si, f"{si_id}.pdf", "application/pdf")
+                    with c_pdf4: st.download_button("🚛 Bill of Lading", pdf_bol, f"{bol_id}.pdf", "application/pdf")
                     
                     st.divider()
                     st.download_button(
@@ -990,10 +995,10 @@ with tab_generate:
                             new_ver = save_invoice_metadata(inv_number, total_val, importer_txt.split('\n')[0])
                             
                             files_to_send = [
-                                {'name': f"CI-{new_ver}.pdf", 'data': pdf_ci},
-                                {'name': f"PO-{new_ver}.pdf", 'data': pdf_po},
-                                {'name': f"SI-{new_ver}.pdf", 'data': pdf_si},
-                                {'name': f"BOL-{new_ver}.pdf", 'data': pdf_bol},
+                                {'name': f"{ci_id}.pdf", 'data': pdf_ci},
+                                {'name': f"{po_id}.pdf", 'data': pdf_po},
+                                {'name': f"{si_id}.pdf", 'data': pdf_si},
+                                {'name': f"{bol_id}.pdf", 'data': pdf_bol},
                                 {'name': f"CustomsCity_{new_ver}.csv", 'data': csv_customs}
                             ]
                             
