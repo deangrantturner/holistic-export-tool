@@ -57,7 +57,6 @@ def save_invoice_metadata(inv_num, total_val, buyer):
             if num == inv_num: count += 1
             elif num.startswith(inv_num): count += 1
         
-        # No hyphen
         new_version_num = inv_num if count == 0 else f"{inv_num}{count}"
         
         est = pytz.timezone('US/Eastern')
@@ -132,6 +131,20 @@ def save_signature(image_bytes):
 def get_signature():
     return get_setting('signature')
 
+# --- Helper: Prompt for Backup ---
+def show_backup_prompt(key_suffix):
+    """Shows a warning and a download button to save the DB immediately."""
+    if os.path.exists("invoices.db"):
+        with open("invoices.db", "rb") as f:
+            st.warning("⚠️ **Changes Saved Locally!**\n\nStreamlit will reset if it goes to sleep. **Download the Backup File now** to keep your changes safe.")
+            st.download_button(
+                "📥 Click here to Save Backup to Computer",
+                data=f,
+                file_name=f"holistic_backup_{datetime.now().strftime('%Y-%m-%d_%H%M')}.db",
+                mime="application/x-sqlite3",
+                key=f"prompt_backup_{key_suffix}"
+            )
+
 # --- Email Function ---
 def send_email_with_attachments(sender_email, sender_password, recipient_email, subject, body, files):
     msg = MIMEMultipart()
@@ -185,30 +198,25 @@ st.markdown("""
         .stTextInput input:focus, .stTextArea textarea:focus {
             border-color: #6F4E37 !important; box-shadow: 0 0 0 1px #6F4E37 !important;
         }
+        
+        /* Highlight Backup Area */
+        [data-testid="stSidebar"] {
+            background-color: #f0f2f6;
+        }
     </style>
 """, unsafe_allow_html=True)
 
 # --- BACKUP SIDEBAR ---
-st.sidebar.title("💾 Data Backup")
-st.sidebar.info("Streamlit resets daily. Download your data to save settings, catalog, and history.")
+st.sidebar.header("💾 Data Persistence")
+st.sidebar.info("Use this to RESTORE your settings if the app has reset.")
 
-if os.path.exists("invoices.db"):
-    with open("invoices.db", "rb") as f:
-        st.sidebar.download_button(
-            "📥 Download Backup",
-            data=f,
-            file_name=f"backup_holistic_{date.today()}.db",
-            mime="application/x-sqlite3"
-        )
-
-st.sidebar.markdown("---")
-uploaded_db = st.sidebar.file_uploader("📤 Restore Backup", type=["db"])
+uploaded_db = st.sidebar.file_uploader("📤 Restore Backup File", type=["db"])
 if uploaded_db:
     if st.sidebar.button("⚠️ Confirm Restore"):
         try:
             with open("invoices.db", "wb") as f:
                 f.write(uploaded_db.getvalue())
-            st.sidebar.success("✅ Restored! Reloading...")
+            st.sidebar.success("✅ Restored! Reloading page...")
             st.rerun()
         except Exception as e:
             st.sidebar.error(f"Error: {e}")
@@ -247,7 +255,6 @@ class ProInvoice(FPDF):
     def footer(self):
         self.set_y(-15)
         self.set_font('Helvetica', 'I', 8)
-        # Page X of Y
         self.cell(0, 10, f'Page {self.page_no()} of {{nb}}', 0, 0, 'R')
 
 # --- 1. COMMERCIAL INVOICE GENERATOR ---
@@ -257,16 +264,13 @@ def generate_ci_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_sh
     pdf.add_page()
     pdf.set_auto_page_break(auto=False)
     
-    # --- HEADER ---
     pdf.set_font('Helvetica', 'B', 20)
     pdf.cell(0, 10, doc_type, 0, 1, 'C')
     pdf.ln(5)
 
-    # --- INFO BLOCKS ---
     pdf.set_font("Helvetica", '', 9)
     y_start = pdf.get_y()
     
-    # Column 1
     pdf.set_xy(10, y_start)
     pdf.set_font("Helvetica", 'B', 10)
     lbl_from = "SHIPPER / EXPORTER:"
@@ -276,7 +280,6 @@ def generate_ci_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_sh
     pdf.multi_cell(70, 4, addr_from)
     y_end_1 = pdf.get_y()
 
-    # Column 2
     pdf.set_xy(90, y_start) 
     pdf.set_font("Helvetica", 'B', 10)
     lbl_to = "CONSIGNEE (SHIP TO):"
@@ -286,7 +289,6 @@ def generate_ci_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_sh
     pdf.multi_cell(70, 4, addr_ship)
     y_end_2 = pdf.get_y()
 
-    # Column 3
     x_right = 160
     pdf.set_xy(x_right, y_start)
     pdf.set_font("Helvetica", 'B', 12)
@@ -300,7 +302,6 @@ def generate_ci_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_sh
     pdf.cell(40, 6, "Origin: CANADA", 0, 1, 'R')
     y_end_3 = pdf.get_y()
 
-    # Row 2
     y_mid = max(y_end_1, y_end_2, y_end_3) + 10
     
     pdf.set_xy(10, y_mid)
@@ -323,7 +324,6 @@ def generate_ci_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_sh
     
     pdf.set_y(y_mid + 35)
 
-    # --- TABLE HEADERS ---
     w = [12, 40, 45, 23, 23, 22, 25]
     headers = ["QTY", "PRODUCT", "DESCRIPTION", "HTS #", "FDA CODE", "UNIT ($)", "TOTAL ($)"]
     
@@ -333,7 +333,6 @@ def generate_ci_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_sh
         pdf.cell(w[i], 8, h, 1, 0, 'C', fill=True)
     pdf.ln()
     
-    # --- HELPER: Exact Line Counter ---
     def get_lines_needed(text, width):
         if not text: return 1
         lines = 0
@@ -354,7 +353,6 @@ def generate_ci_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_sh
             lines += lines_para
         return lines
 
-    # --- DYNAMIC TABLE ROWS ---
     pdf.set_font("Helvetica", '', 7)
     line_h = 5
 
@@ -372,7 +370,6 @@ def generate_ci_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_sh
             (hts, 'C'), (fda, 'C'), (price, 'R'), (tot, 'R')
         ]
         
-        # Calculate Max Row Height using Pixel-Perfect Logic
         max_lines = 1
         for i, (txt, align) in enumerate(data_row):
             lines = get_lines_needed(txt, w[i] - 2) 
@@ -410,7 +407,6 @@ def generate_ci_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_sh
     pdf.cell(sum(w[:-1]), 8, "TOTAL VALUE (USD):", 0, 0, 'R')
     pdf.cell(w[-1], 8, f"${total_val:,.2f}", 1, 1, 'R')
     
-    # --- SIGNATURE BLOCK ---
     pdf.ln(10)
     if pdf.get_y() > 250: pdf.add_page()
     
@@ -443,16 +439,13 @@ def generate_si_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes,
     pdf.add_page()
     pdf.set_auto_page_break(auto=False)
     
-    # --- HEADER ---
     pdf.set_font('Helvetica', 'B', 20)
     pdf.cell(0, 10, "SALES INVOICE", 0, 1, 'C')
     pdf.ln(5)
 
-    # --- INFO BLOCKS ---
     pdf.set_font("Helvetica", '', 9)
     y_start = pdf.get_y()
     
-    # Column 1
     pdf.set_xy(10, y_start)
     pdf.set_font("Helvetica", 'B', 10)
     pdf.cell(70, 5, "SHIPPER / EXPORTER:", 0, 1)
@@ -461,7 +454,6 @@ def generate_si_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes,
     pdf.multi_cell(70, 4, addr_from)
     y_end_1 = pdf.get_y()
 
-    # Column 2
     pdf.set_xy(90, y_start) 
     pdf.set_font("Helvetica", 'B', 10)
     pdf.cell(70, 5, "SHIP TO:", 0, 1)
@@ -470,7 +462,6 @@ def generate_si_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes,
     pdf.multi_cell(70, 4, addr_ship)
     y_end_2 = pdf.get_y()
 
-    # Column 3
     x_right = 160
     pdf.set_xy(x_right, y_start)
     pdf.set_font("Helvetica", 'B', 12)
@@ -482,7 +473,6 @@ def generate_si_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes,
     pdf.cell(40, 6, "Currency: USD", 0, 1, 'R')
     y_end_3 = pdf.get_y()
 
-    # Row 2 (Bill To only, no Notes Box)
     y_mid = max(y_end_1, y_end_2, y_end_3) + 10
     
     pdf.set_xy(10, y_mid)
@@ -494,7 +484,6 @@ def generate_si_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes,
     
     pdf.set_y(y_mid + 35)
 
-    # --- TABLE HEADERS (Simplified) ---
     w = [20, 100, 35, 35] 
     headers = ["QTY", "PRODUCT", "UNIT ($)", "TOTAL ($)"]
     
@@ -504,7 +493,6 @@ def generate_si_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes,
         pdf.cell(w[i], 8, h, 1, 0, 'C', fill=True)
     pdf.ln()
     
-    # --- HELPER: Exact Line Counter ---
     def get_lines_needed(text, width):
         if not text: return 1
         lines = 0
@@ -525,14 +513,12 @@ def generate_si_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes,
             lines += lines_para
         return lines
 
-    # --- DYNAMIC TABLE ROWS ---
     pdf.set_font("Helvetica", '', 7)
     line_h = 5
 
     for _, row in df.iterrows():
         qty = str(int(row['Quantity']))
         prod_name = str(row['Product Name'])
-        # No Description, HTS, FDA
         price = f"{row['Transfer Price (Unit)']:.2f}"
         tot = f"{row['Transfer Total']:.2f}"
         
@@ -586,16 +572,13 @@ def generate_pl_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, carton
     pdf.add_page()
     pdf.set_auto_page_break(auto=False)
     
-    # --- HEADER ---
     pdf.set_font('Helvetica', 'B', 20)
     pdf.cell(0, 10, "PACKING LIST", 0, 1, 'C')
     pdf.ln(5)
 
-    # --- INFO BLOCKS ---
     pdf.set_font("Helvetica", '', 9)
     y_start = pdf.get_y()
     
-    # Column 1
     pdf.set_xy(10, y_start)
     pdf.set_font("Helvetica", 'B', 10)
     pdf.cell(70, 5, "SHIPPER / EXPORTER:", 0, 1)
@@ -604,7 +587,6 @@ def generate_pl_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, carton
     pdf.multi_cell(70, 4, addr_from)
     y_end_1 = pdf.get_y()
 
-    # Column 2
     pdf.set_xy(90, y_start) 
     pdf.set_font("Helvetica", 'B', 10)
     pdf.cell(70, 5, "SHIP TO:", 0, 1)
@@ -613,7 +595,6 @@ def generate_pl_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, carton
     pdf.multi_cell(70, 4, addr_ship)
     y_end_2 = pdf.get_y()
 
-    # Column 3
     x_right = 160
     pdf.set_xy(x_right, y_start)
     pdf.set_font("Helvetica", 'B', 12)
@@ -623,7 +604,6 @@ def generate_pl_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, carton
     pdf.cell(40, 6, f"Date: {inv_date}", 0, 1, 'R')
     y_end_3 = pdf.get_y()
 
-    # Row 2 (Bill To)
     y_mid = max(y_end_1, y_end_2, y_end_3) + 10
     
     pdf.set_xy(10, y_mid)
@@ -635,7 +615,6 @@ def generate_pl_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, carton
     
     pdf.set_y(y_mid + 35)
 
-    # --- TABLE HEADERS ---
     w = [30, 160] 
     headers = ["QTY", "PRODUCT"]
     
@@ -721,7 +700,6 @@ def generate_po_pdf(df, inv_num, inv_date, addr_buyer, addr_vendor, addr_ship, t
     pdf.add_page()
     pdf.set_auto_page_break(auto=False)
     
-    # --- HEADER ---
     pdf.set_font('Helvetica', 'B', 20)
     pdf.cell(0, 10, "PURCHASE ORDER", 0, 1, 'C')
     pdf.ln(5)
@@ -729,7 +707,6 @@ def generate_po_pdf(df, inv_num, inv_date, addr_buyer, addr_vendor, addr_ship, t
     pdf.set_font("Helvetica", '', 9)
     y_start = pdf.get_y()
     
-    # Column 1
     pdf.set_xy(10, y_start)
     pdf.set_font("Helvetica", 'B', 10)
     pdf.cell(70, 5, "FROM (BUYER):", 0, 1)
@@ -738,7 +715,6 @@ def generate_po_pdf(df, inv_num, inv_date, addr_buyer, addr_vendor, addr_ship, t
     pdf.multi_cell(70, 4, addr_buyer)
     y_end_1 = pdf.get_y()
 
-    # Column 2
     pdf.set_xy(90, y_start) 
     pdf.set_font("Helvetica", 'B', 10)
     pdf.cell(70, 5, "SHIP TO:", 0, 1)
@@ -747,7 +723,6 @@ def generate_po_pdf(df, inv_num, inv_date, addr_buyer, addr_vendor, addr_ship, t
     pdf.multi_cell(70, 4, addr_ship)
     y_end_2 = pdf.get_y()
 
-    # Column 3
     x_right = 160
     pdf.set_xy(x_right, y_start)
     pdf.set_font("Helvetica", 'B', 12)
@@ -770,7 +745,6 @@ def generate_po_pdf(df, inv_num, inv_date, addr_buyer, addr_vendor, addr_ship, t
     
     pdf.set_y(y_mid + 35)
 
-    # --- TABLE HEADERS ---
     w = [20, 100, 35, 35] 
     headers = ["QTY", "PRODUCT", "UNIT ($)", "TOTAL ($)"]
     
@@ -1134,6 +1108,7 @@ with tab_generate:
             if st.button("💾 Save Consignee as Default", key="save_cons_btn"):
                 save_setting('default_consignee', consignee_txt.encode('utf-8'))
                 st.success("Default Saved!")
+                show_backup_prompt("cons") # PROMPT HERE
             
             st.divider() # Visual separation
             
@@ -1141,6 +1116,7 @@ with tab_generate:
             if st.button("💾 Save Notes as Default", key="save_notes_btn"):
                 save_setting('default_notes', notes_txt.encode('utf-8'))
                 st.success("Default Saved!")
+                show_backup_prompt("notes") # PROMPT HERE
 
         st.markdown("---")
         # CARRIER SELECTION
@@ -1164,6 +1140,7 @@ with tab_generate:
             if st.button("💾 Save as Default"):
                 save_setting('default_carrier', carrier_opt.encode('utf-8'))
                 st.success(f"Default set to {carrier_opt}")
+                show_backup_prompt("carrier") # PROMPT HERE
             
             if carrier_opt == "Other":
                 carrier_code = st.text_input("Enter Custom Carrier Code (for CSV)")
@@ -1194,6 +1171,7 @@ with tab_generate:
                     bytes_data = sig_upload.getvalue()
                     save_signature(bytes_data)
                     st.success("Saved!")
+                    show_backup_prompt("sig") # PROMPT HERE
                     st.rerun()
         final_sig_bytes = saved_sig_bytes if saved_sig_bytes else None
 
@@ -1382,9 +1360,12 @@ with tab_generate:
                             save_setting('smtp_email', sender_email.encode('utf-8'))
                             save_setting('smtp_pass', sender_pass.encode('utf-8'))
                             st.success("Saved!")
+                            show_backup_prompt("creds") # PROMPT HERE
                     
                     recipient_email = st.text_input("Send To:", value="dean.turner@holisticroasters.com")
                     
+                    attach_backup = st.checkbox("Attach App Backup (invoices.db)", value=True, help="Useful for restoring settings if the app reboots.")
+
                     if st.button("📧 Email All Documents", type="primary"):
                         if not sender_pass:
                             st.error("Please enter your App Password in the settings above.")
@@ -1399,6 +1380,11 @@ with tab_generate:
                                 {'name': f"{bol_id}.pdf", 'data': pdf_bol},
                                 {'name': f"CustomsCity_{new_ver}.csv", 'data': csv_customs}
                             ]
+                            
+                            if attach_backup and os.path.exists('invoices.db'):
+                                with open('invoices.db', 'rb') as f:
+                                    db_bytes = f.read()
+                                files_to_send.append({'name': f'backup_holistic_{date.today()}.db', 'data': db_bytes})
                             
                             success, msg = send_email_with_attachments(sender_email, sender_pass, recipient_email, 
                                                                        f"Export Docs: {new_ver}", 
@@ -1438,6 +1424,7 @@ with tab_catalog:
             new_cat_df = pd.read_csv(cat_upload)
             upsert_catalog_from_df(new_cat_df)
             st.success("Catalog Updated!")
+            show_backup_prompt("cat_upload") # PROMPT HERE
             st.rerun()
         except Exception as e:
             st.error(f"Error: {e}")
@@ -1451,6 +1438,7 @@ with tab_catalog:
         if st.button("💾 Save Changes"):
             upsert_catalog_from_df(edited_catalog)
             st.success("Saved!")
+            show_backup_prompt("cat_edit") # PROMPT HERE
 
 # ================= TAB 3: HISTORY =================
 with tab_history:
