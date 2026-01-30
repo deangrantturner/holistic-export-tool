@@ -1322,13 +1322,23 @@ with tab_generate:
                     with c_pdf5: st.download_button("🚛 Bill of Lading", pdf_bol, f"{bol_id}.pdf", "application/pdf")
                     
                     st.divider()
-                    st.download_button(
-                        label="📥 Download CustomsCity CSV",
-                        data=csv_customs,
-                        file_name=f"CustomsCity_{inv_number}.csv",
-                        mime="text/csv",
-                        type="primary"
-                    )
+                    c_csv_btn, c_csv_link = st.columns([1.5, 2]) # Adjust ratio for button vs link width
+                    with c_csv_btn:
+                        st.download_button(
+                            label="📥 Download CustomsCity CSV",
+                            data=csv_customs,
+                            file_name=f"CustomsCity_{inv_number}.csv",
+                            mime="text/csv",
+                            type="primary"
+                        )
+                    with c_csv_link:
+                        st.markdown("""
+                            <div style="margin-top: 8px;">
+                                <a href="https://app.customscity.com/upload/document/" target="_blank" style="font-weight: 600; color: #6F4E37; text-decoration: none;">
+                                    🚀 Upload to CustomsCity
+                                </a>
+                            </div>
+                        """, unsafe_allow_html=True)
                 
                 with col_right:
                     # EXPANDED BY DEFAULT
