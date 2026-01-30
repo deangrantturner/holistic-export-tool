@@ -188,6 +188,31 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
+# --- BACKUP SIDEBAR ---
+st.sidebar.title("💾 Data Backup")
+st.sidebar.info("Streamlit resets daily. Download your data to save settings, catalog, and history.")
+
+if os.path.exists("invoices.db"):
+    with open("invoices.db", "rb") as f:
+        st.sidebar.download_button(
+            "📥 Download Backup",
+            data=f,
+            file_name=f"backup_holistic_{date.today()}.db",
+            mime="application/x-sqlite3"
+        )
+
+st.sidebar.markdown("---")
+uploaded_db = st.sidebar.file_uploader("📤 Restore Backup", type=["db"])
+if uploaded_db:
+    if st.sidebar.button("⚠️ Confirm Restore"):
+        try:
+            with open("invoices.db", "wb") as f:
+                f.write(uploaded_db.getvalue())
+            st.sidebar.success("✅ Restored! Reloading...")
+            st.rerun()
+        except Exception as e:
+            st.sidebar.error(f"Error: {e}")
+
 st.title("☕ Holistic Roasters Export Hub")
 
 tab_generate, tab_catalog, tab_history = st.tabs(["📝 Generate Documents", "📦 Product Catalog", "🗄️ Documents Archive"])
