@@ -276,7 +276,8 @@ if os.path.exists("invoices.db"):
             data=f,
             file_name=f"holistic_backup_{datetime.now().strftime('%Y-%m-%d_%H%M')}.db",
             mime="application/x-sqlite3",
-            help="Download this file to save your work. Upload it when you come back."
+            help="Download this file to save your work. Upload it when you come back.",
+            key="sidebar_backup_dl_btn" # ADDED UNIQUE KEY
         )
 
 st.sidebar.markdown("---")
@@ -462,6 +463,7 @@ def generate_customscity_csv(df, inv_number, inv_date, ship_to_txt, hbol_number,
     
     rows = []
     for _, row in df.iterrows():
+        # EXCLUDE ROW IF FDA CODE IS MISSING
         fda = str(row.get('FDA Code', '')).strip()
         if not fda or fda.lower() == 'nan': continue
         rows.append({
@@ -545,7 +547,8 @@ if os.path.exists("invoices.db"):
             data=f,
             file_name=f"holistic_backup_{datetime.now().strftime('%Y-%m-%d_%H%M')}.db",
             mime="application/x-sqlite3",
-            help="Download this file to save your work. Upload it when you come back."
+            help="Download this file to save your work. Upload it when you come back.",
+            key="sidebar_backup_dl_btn" # ADDED UNIQUE KEY
         )
 
 st.sidebar.markdown("---")
@@ -721,14 +724,14 @@ if page == "Batches (Dashboard)":
                 csv_data = generate_customscity_csv(edited_df, b_inv_num, b_date, b_cons, hbol, carrier_code)
                 
                 c1, c2, c3, c4, c5 = st.columns(5)
-                with c1: st.download_button("CI PDF", pdf_ci, "CI.pdf")
-                with c2: st.download_button("PO PDF", pdf_po, "PO.pdf")
-                with c3: st.download_button("SI PDF", pdf_si, "SI.pdf")
-                with c4: st.download_button("PL PDF", pdf_pl, "PL.pdf")
-                with c5: st.download_button("BOL PDF", pdf_bol, "BOL.pdf")
+                with c1: st.download_button("CI PDF", pdf_ci, "CI.pdf", key=f"dl_ci_{batch_id}")
+                with c2: st.download_button("PO PDF", pdf_po, "PO.pdf", key=f"dl_po_{batch_id}")
+                with c3: st.download_button("SI PDF", pdf_si, "SI.pdf", key=f"dl_si_{batch_id}")
+                with c4: st.download_button("PL PDF", pdf_pl, "PL.pdf", key=f"dl_pl_{batch_id}")
+                with c5: st.download_button("BOL PDF", pdf_bol, "BOL.pdf", key=f"dl_bol_{batch_id}")
                 
                 c_csv_btn, c_csv_link = st.columns([1.5, 2])
-                with c_csv_btn: st.download_button("📥 CustomsCity CSV", csv_data, "upload.csv", type="primary")
+                with c_csv_btn: st.download_button("📥 CustomsCity CSV", csv_data, "upload.csv", type="primary", key=f"dl_csv_{batch_id}")
                 with c_csv_link: st.markdown("""<div style="margin-top: 8px;"><a href="https://app.customscity.com/upload/document/" target="_blank" style="font-weight: 600; color: #6F4E37; text-decoration: none;">🚀 Upload to CustomsCity</a></div>""", unsafe_allow_html=True)
                 
                 # EMAIL CENTER
@@ -782,7 +785,7 @@ elif page == "Catalog":
     c1, c2 = st.columns(2)
     with c1:
         curr_cat = get_catalog()
-        if not curr_cat.empty: st.download_button("Download Catalog", curr_cat.to_csv(index=False).encode(), "catalog.csv")
+        if not curr_cat.empty: st.download_button("Download Catalog", curr_cat.to_csv(index=False).encode(), "catalog.csv", key="cat_dl_btn")
     with c2:
         up_cat = st.file_uploader("Upload Catalog", type=['csv'])
         if up_cat:
