@@ -45,7 +45,6 @@ DEFAULT_FDA = "31ADT01"
 def init_db():
     conn = sqlite3.connect('invoices.db')
     c = conn.cursor()
-    # 1. Existing Tables (Preserved)
     c.execute('''CREATE TABLE IF NOT EXISTS invoice_history_v3
                  (id INTEGER PRIMARY KEY AUTOINCREMENT,
                   invoice_number TEXT,
@@ -65,7 +64,6 @@ def init_db():
                  (key TEXT PRIMARY KEY,
                   value BLOB)''')
     
-    # 2. NEW Table for Batches (Added safely)
     c.execute('''CREATE TABLE IF NOT EXISTS batches
                  (id INTEGER PRIMARY KEY AUTOINCREMENT,
                   batch_name TEXT,
@@ -79,7 +77,6 @@ def init_db():
 
 # --- DB Functions ---
 def clean_sku(val):
-    """Fixes '10121' vs 10121.0 mismatch"""
     if pd.isna(val) or val == "": return ""
     val_str = str(val).strip()
     if val_str.endswith(".0"): return val_str[:-2]
@@ -102,7 +99,6 @@ def upsert_catalog_from_df(df):
         except: weight = 0.0
         if pd.isna(desc) or desc == "": desc = p_name
         
-        # CLEAN SKU before saving
         sku_val = clean_sku(row['sku'])
         
         c.execute("""INSERT OR REPLACE INTO product_catalog_v3 
@@ -130,6 +126,13 @@ def get_setting(key):
 def get_signature():
     return get_setting('signature')
 
+def clear_signature():
+    conn = sqlite3.connect('invoices.db')
+    c = conn.cursor()
+    c.execute("DELETE FROM settings WHERE key='signature'")
+    conn.commit()
+    conn.close()
+
 # --- BATCH FUNCTIONS ---
 def get_batches(status='Active'):
     conn = sqlite3.connect('invoices.db')
@@ -143,7 +146,6 @@ def create_batch(name):
     est = pytz.timezone('US/Eastern')
     now = datetime.now(est).strftime("%Y-%m-%d %H:%M:%S")
     
-    # 1. Grab defaults from Global Settings (if they exist)
     saved_cons = get_setting('default_consignee')
     def_cons = saved_cons.decode('utf-8') if saved_cons else DEFAULT_CONSIGNEE
     
@@ -153,7 +155,6 @@ def create_batch(name):
     saved_carrier = get_setting('default_carrier')
     def_carrier = saved_carrier.decode('utf-8') if saved_carrier else "FX (FedEx)"
 
-    # 2. Initialize Data
     new_data = {
         "inv_number": f"{date.today().strftime('%Y%m%d')}1",
         "inv_date": str(date.today()),
@@ -167,13 +168,11 @@ def create_batch(name):
         "orders_json": None
     }
 
-    # 3. Inherit from LAST batch (Overrides global defaults if available)
     try:
         c.execute("SELECT data FROM batches ORDER BY updated_at DESC LIMIT 1")
         row = c.fetchone()
         if row:
             last_data = json.loads(row[0])
-            # Only copy specific fields
             if 'discount' in last_data: new_data['discount'] = last_data['discount']
             if 'consignee' in last_data and last_data['consignee']: new_data['consignee'] = last_data['consignee']
             if 'notes' in last_data and last_data['notes']: new_data['notes'] = last_data['notes']
@@ -324,31 +323,91 @@ class ProInvoice(FPDF):
         self.set_font('Helvetica', 'I', 8)
         self.cell(0, 10, f'Page {self.page_no()} of {{nb}}', 0, 0, 'R')
 
-# --- PDF Generators ---
+# --- PDF Generators (UPDATED WITH TEXT WRAPPING) ---
 def generate_ci_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes, total_val, sig_bytes=None, signer_name="Dean Turner"):
     pdf = ProInvoice(); pdf.alias_nb_pages(); pdf.add_page(); pdf.set_auto_page_break(auto=False)
     pdf.set_font('Helvetica', 'B', 20); pdf.cell(0, 10, doc_type, 0, 1, 'C'); pdf.ln(5)
+    
+    # Header Info
     pdf.set_font("Helvetica", '', 9); y_start = pdf.get_y()
     pdf.set_xy(10, y_start); pdf.set_font("Helvetica", 'B', 10); pdf.cell(70, 5, "SHIPPER / EXPORTER:", 0, 1)
     pdf.set_x(10); pdf.set_font("Helvetica", '', 9); pdf.multi_cell(70, 4, addr_from)
+    
     pdf.set_xy(90, y_start); pdf.set_font("Helvetica", 'B', 10); pdf.cell(70, 5, "CONSIGNEE (SHIP TO):", 0, 1)
     pdf.set_xy(90, pdf.get_y()); pdf.set_font("Helvetica", '', 9); pdf.multi_cell(70, 4, addr_ship)
+    
     pdf.set_xy(160, y_start); pdf.set_font("Helvetica", 'B', 12); pdf.cell(40, 6, f"Invoice #: {inv_num}", 0, 1, 'R')
     pdf.set_x(160); pdf.set_font("Helvetica", '', 10); pdf.cell(40, 6, f"Date: {inv_date}", 0, 1, 'R')
     pdf.set_x(160); pdf.cell(40, 6, "Currency: USD", 0, 1, 'R'); pdf.set_x(160); pdf.cell(40, 6, "Origin: CANADA", 0, 1, 'R')
-    y_mid = max(pdf.get_y(), 60) + 10; pdf.set_xy(10, y_mid); pdf.set_font("Helvetica", 'B', 10); pdf.cell(80, 5, "IMPORTER OF RECORD:", 0, 1)
+    
+    y_mid = max(pdf.get_y(), 60) + 10
+    pdf.set_xy(10, y_mid); pdf.set_font("Helvetica", 'B', 10); pdf.cell(80, 5, "IMPORTER OF RECORD:", 0, 1)
     pdf.set_x(10); pdf.set_font("Helvetica", '', 9); pdf.multi_cell(80, 4, addr_to)
+    
     pdf.set_xy(100, y_mid); pdf.set_fill_color(245, 245, 245); pdf.rect(100, y_mid, 95, 30, 'F')
     pdf.set_xy(102, y_mid + 2); pdf.set_font("Helvetica", 'B', 9); pdf.cell(50, 5, "NOTES / BROKER / FDA:", 0, 1)
     pdf.set_xy(102, pdf.get_y()); pdf.set_font("Helvetica", '', 8); pdf.multi_cell(90, 4, notes); pdf.set_y(y_mid + 35)
+    
+    # Table Header
     w = [12, 40, 45, 23, 23, 22, 25]; headers = ["QTY", "PRODUCT", "DESCRIPTION", "HTS #", "FDA CODE", "UNIT ($)", "TOTAL ($)"]
     pdf.set_font("Helvetica", 'B', 7); pdf.set_fill_color(220, 220, 220)
     for i, h in enumerate(headers): pdf.cell(w[i], 8, h, 1, 0, 'C', fill=True)
     pdf.ln(); pdf.set_font("Helvetica", '', 7)
+    
+    # Helper: Count lines needed
+    def get_lines(text, width):
+        if not text: return 1
+        lines = 0
+        for para in str(text).split('\n'):
+            if not para: lines += 1; continue
+            words = para.split(' ')
+            curr_w = 0; lines_para = 1
+            for word in words:
+                word_w = pdf.get_string_width(word + " ")
+                if curr_w + word_w > width: lines_para += 1; curr_w = word_w
+                else: curr_w += word_w
+            lines += lines_para
+        return lines
+
+    line_h = 5
     for _, row in df.iterrows():
-        data = [str(int(row['Quantity'])), str(row['Product Name']), str(row['Description']), str(row.get('HTS Code','')), str(row.get('FDA Code','')), f"{row['Transfer Price (Unit)']:.2f}", f"{row['Transfer Total']:.2f}"]
-        for i, d in enumerate(data): pdf.cell(w[i], 6, d, 1, 0, 'L' if i in [1,2] else 'C')
-        pdf.ln()
+        # Prepare Data Row with Alignment
+        d_row = [
+            (str(int(row['Quantity'])), 'C'), 
+            (str(row['Product Name']), 'L'), 
+            (str(row['Description']), 'L'),
+            (str(row.get('HTS Code','')), 'C'), 
+            (str(row.get('FDA Code','')), 'C'),
+            (f"{row['Transfer Price (Unit)']:.2f}", 'R'), 
+            (f"{row['Transfer Total']:.2f}", 'R')
+        ]
+        
+        # Calculate max height
+        max_lines = 1
+        for i, (txt, align) in enumerate(d_row):
+            lines = get_lines(txt, w[i] - 2)
+            if lines > max_lines: max_lines = lines
+        row_h = max_lines * line_h
+        
+        # Page break check
+        if pdf.get_y() + row_h > 270:
+            pdf.add_page(); pdf.set_font("Helvetica", 'B', 7); pdf.set_fill_color(220, 220, 220)
+            for i, h in enumerate(headers): pdf.cell(w[i], 8, h, 1, 0, 'C', fill=True)
+            pdf.ln(); pdf.set_font("Helvetica", '', 7)
+            
+        # Render Row
+        y_curr = pdf.get_y(); x_curr = 10
+        for i, (txt, align) in enumerate(d_row):
+            pdf.set_xy(x_curr + sum(w[:i]), y_curr)
+            pdf.multi_cell(w[i], line_h, txt, 0, align)
+        
+        # Borders
+        pdf.set_xy(10, y_curr)
+        for i in range(len(w)):
+            pdf.rect(10 + sum(w[:i]), y_curr, w[i], row_h)
+        
+        pdf.set_y(y_curr + row_h)
+
     pdf.ln(2); pdf.set_font("Helvetica", 'B', 9); pdf.cell(sum(w[:-1]), 8, "TOTAL VALUE (USD):", 0, 0, 'R'); pdf.cell(w[-1], 8, f"${total_val:,.2f}", 1, 1, 'R')
     pdf.ln(10); pdf.set_font("Helvetica", '', 10); pdf.cell(0, 5, "I declare that all information contained in this invoice to be true and correct.", 0, 1, 'L')
     pdf.ln(10); pdf.set_font("Helvetica", 'B', 10); pdf.cell(0, 5, signer_name, 0, 1, 'L')
@@ -360,7 +419,6 @@ def generate_ci_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_sh
     return bytes(pdf.output())
 
 def generate_si_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes, total_val, sig_bytes, signer_name):
-    # Simplified Sales Invoice
     pdf = ProInvoice(); pdf.alias_nb_pages(); pdf.add_page(); pdf.set_auto_page_break(auto=False)
     pdf.set_font('Helvetica', 'B', 20); pdf.cell(0, 10, "SALES INVOICE", 0, 1, 'C'); pdf.ln(5)
     pdf.set_font("Helvetica", '', 9); y_start = pdf.get_y()
@@ -368,14 +426,47 @@ def generate_si_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes,
     pdf.set_xy(90, y_start); pdf.set_font("Helvetica", 'B', 10); pdf.cell(70, 5, "SHIP TO:", 0, 1); pdf.set_xy(90, pdf.get_y()); pdf.set_font("Helvetica", '', 9); pdf.multi_cell(70, 4, addr_ship)
     pdf.set_xy(160, y_start); pdf.set_font("Helvetica", 'B', 12); pdf.cell(40, 6, f"Invoice #: {inv_num}", 0, 1, 'R'); pdf.set_x(160); pdf.set_font("Helvetica", '', 10); pdf.cell(40, 6, f"Date: {inv_date}", 0, 1, 'R'); pdf.set_x(160); pdf.cell(40, 6, "Currency: USD", 0, 1, 'R')
     y_mid = max(pdf.get_y(), 50) + 10; pdf.set_xy(10, y_mid); pdf.set_font("Helvetica", 'B', 10); pdf.cell(80, 5, "BILL TO:", 0, 1); pdf.set_x(10); pdf.set_font("Helvetica", '', 9); pdf.multi_cell(80, 4, addr_to); pdf.set_y(y_mid + 35)
+    
     w = [20, 100, 35, 35]; headers = ["QTY", "PRODUCT", "UNIT ($)", "TOTAL ($)"]
     pdf.set_font("Helvetica", 'B', 7); pdf.set_fill_color(220, 220, 220); 
     for i, h in enumerate(headers): pdf.cell(w[i], 8, h, 1, 0, 'C', fill=True)
     pdf.ln(); pdf.set_font("Helvetica", '', 7)
+    
+    def get_lines(text, width):
+        if not text: return 1
+        lines = 0; 
+        for para in str(text).split('\n'):
+            if not para: lines += 1; continue
+            words = para.split(' '); curr_w = 0; lines_para = 1
+            for word in words:
+                word_w = pdf.get_string_width(word + " ")
+                if curr_w + word_w > width: lines_para += 1; curr_w = word_w
+                else: curr_w += word_w
+            lines += lines_para
+        return lines
+
+    line_h = 5
     for _, row in df.iterrows():
-        data = [str(int(row['Quantity'])), str(row['Product Name']), f"{row['Transfer Price (Unit)']:.2f}", f"{row['Transfer Total']:.2f}"]
-        for i, d in enumerate(data): pdf.cell(w[i], 6, d, 1, 0, 'L' if i==1 else 'C')
-        pdf.ln()
+        d_row = [(str(int(row['Quantity'])), 'C'), (str(row['Product Name']), 'L'), (f"{row['Transfer Price (Unit)']:.2f}", 'R'), (f"{row['Transfer Total']:.2f}", 'R')]
+        max_lines = 1
+        for i, (txt, align) in enumerate(d_row):
+            lines = get_lines(txt, w[i] - 2)
+            if lines > max_lines: max_lines = lines
+        row_h = max_lines * line_h
+        
+        if pdf.get_y() + row_h > 270:
+            pdf.add_page(); pdf.set_font("Helvetica", 'B', 7); pdf.set_fill_color(220, 220, 220)
+            for i, h in enumerate(headers): pdf.cell(w[i], 8, h, 1, 0, 'C', fill=True)
+            pdf.ln(); pdf.set_font("Helvetica", '', 7)
+            
+        y_curr = pdf.get_y(); x_curr = 10
+        for i, (txt, align) in enumerate(d_row):
+            pdf.set_xy(x_curr + sum(w[:i]), y_curr)
+            pdf.multi_cell(w[i], line_h, txt, 0, align)
+        pdf.set_xy(10, y_curr)
+        for i in range(len(w)): pdf.rect(10 + sum(w[:i]), y_curr, w[i], row_h)
+        pdf.set_y(y_curr + row_h)
+
     pdf.ln(2); pdf.set_font("Helvetica", 'B', 9); pdf.cell(sum(w[:-1]), 8, "TOTAL AMOUNT DUE (USD):", 0, 0, 'R'); pdf.cell(w[-1], 8, f"${total_val:,.2f}", 1, 1, 'R')
     return bytes(pdf.output())
 
@@ -387,14 +478,47 @@ def generate_pl_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, carton
     pdf.set_xy(90, y_start); pdf.set_font("Helvetica", 'B', 10); pdf.cell(70, 5, "SHIP TO:", 0, 1); pdf.set_xy(90, pdf.get_y()); pdf.set_font("Helvetica", '', 9); pdf.multi_cell(70, 4, addr_ship)
     pdf.set_xy(160, y_start); pdf.set_font("Helvetica", 'B', 12); pdf.cell(40, 6, f"Packing List #: {inv_num}", 0, 1, 'R'); pdf.set_x(160); pdf.set_font("Helvetica", '', 10); pdf.cell(40, 6, f"Date: {inv_date}", 0, 1, 'R')
     y_mid = max(pdf.get_y(), 50) + 10; pdf.set_xy(10, y_mid); pdf.set_font("Helvetica", 'B', 10); pdf.cell(80, 5, "BILL TO:", 0, 1); pdf.set_x(10); pdf.set_font("Helvetica", '', 9); pdf.multi_cell(80, 4, addr_to); pdf.set_y(y_mid + 35)
+    
     w = [30, 160]; headers = ["QTY", "PRODUCT"]
     pdf.set_font("Helvetica", 'B', 7); pdf.set_fill_color(220, 220, 220)
     for i, h in enumerate(headers): pdf.cell(w[i], 8, h, 1, 0, 'C', fill=True)
     pdf.ln(); pdf.set_font("Helvetica", '', 7)
+    
+    def get_lines(text, width):
+        if not text: return 1
+        lines = 0; 
+        for para in str(text).split('\n'):
+            if not para: lines += 1; continue
+            words = para.split(' '); curr_w = 0; lines_para = 1
+            for word in words:
+                word_w = pdf.get_string_width(word + " ")
+                if curr_w + word_w > width: lines_para += 1; curr_w = word_w
+                else: curr_w += word_w
+            lines += lines_para
+        return lines
+
+    line_h = 5
     for _, row in df.iterrows():
-        data = [str(int(row['Quantity'])), str(row['Product Name'])]
-        for i, d in enumerate(data): pdf.cell(w[i], 6, d, 1, 0, 'L' if i==1 else 'C')
-        pdf.ln()
+        d_row = [(str(int(row['Quantity'])), 'C'), (str(row['Product Name']), 'L')]
+        max_lines = 1
+        for i, (txt, align) in enumerate(d_row):
+            lines = get_lines(txt, w[i] - 2)
+            if lines > max_lines: max_lines = lines
+        row_h = max_lines * line_h
+        
+        if pdf.get_y() + row_h > 270:
+            pdf.add_page(); pdf.set_font("Helvetica", 'B', 7); pdf.set_fill_color(220, 220, 220)
+            for i, h in enumerate(headers): pdf.cell(w[i], 8, h, 1, 0, 'C', fill=True)
+            pdf.ln(); pdf.set_font("Helvetica", '', 7)
+            
+        y_curr = pdf.get_y(); x_curr = 10
+        for i, (txt, align) in enumerate(d_row):
+            pdf.set_xy(x_curr + sum(w[:i]), y_curr)
+            pdf.multi_cell(w[i], line_h, txt, 0, align)
+        pdf.set_xy(10, y_curr)
+        for i in range(len(w)): pdf.rect(10 + sum(w[:i]), y_curr, w[i], row_h)
+        pdf.set_y(y_curr + row_h)
+
     pdf.ln(5); pdf.set_font("Helvetica", 'B', 10); pdf.set_x(10); pdf.cell(sum(w), 8, f"TOTAL CARTONS: {cartons}", 0, 1, 'R')
     return bytes(pdf.output())
 
@@ -406,14 +530,47 @@ def generate_po_pdf(df, inv_num, inv_date, addr_buyer, addr_vendor, addr_ship, t
     pdf.set_xy(90, y_start); pdf.set_font("Helvetica", 'B', 10); pdf.cell(70, 5, "SHIP TO:", 0, 1); pdf.set_xy(90, pdf.get_y()); pdf.set_font("Helvetica", '', 9); pdf.multi_cell(70, 4, addr_ship)
     pdf.set_xy(160, y_start); pdf.set_font("Helvetica", 'B', 12); pdf.cell(40, 6, f"Invoice #: {inv_num}", 0, 1, 'R'); pdf.set_x(160); pdf.set_font("Helvetica", '', 10); pdf.cell(40, 6, f"Date: {inv_date}", 0, 1, 'R'); pdf.set_x(160); pdf.cell(40, 6, "Currency: USD", 0, 1, 'R')
     y_mid = max(pdf.get_y(), 50) + 10; pdf.set_xy(10, y_mid); pdf.set_font("Helvetica", 'B', 10); pdf.cell(80, 5, "TO (VENDOR):", 0, 1); pdf.set_x(10); pdf.set_font("Helvetica", '', 9); pdf.multi_cell(80, 4, addr_vendor); pdf.set_y(y_mid + 35)
+    
     w = [20, 100, 35, 35]; headers = ["QTY", "PRODUCT", "UNIT ($)", "TOTAL ($)"]
     pdf.set_font("Helvetica", 'B', 7); pdf.set_fill_color(220, 220, 220)
     for i, h in enumerate(headers): pdf.cell(w[i], 8, h, 1, 0, 'C', fill=True)
     pdf.ln(); pdf.set_font("Helvetica", '', 7)
+    
+    def get_lines(text, width):
+        if not text: return 1
+        lines = 0; 
+        for para in str(text).split('\n'):
+            if not para: lines += 1; continue
+            words = para.split(' '); curr_w = 0; lines_para = 1
+            for word in words:
+                word_w = pdf.get_string_width(word + " ")
+                if curr_w + word_w > width: lines_para += 1; curr_w = word_w
+                else: curr_w += word_w
+            lines += lines_para
+        return lines
+
+    line_h = 5
     for _, row in df.iterrows():
-        data = [str(int(row['Quantity'])), str(row['Product Name']), f"{row['Transfer Price (Unit)']:.2f}", f"{row['Transfer Total']:.2f}"]
-        for i, d in enumerate(data): pdf.cell(w[i], 6, d, 1, 0, 'L' if i==1 else 'C')
-        pdf.ln()
+        d_row = [(str(int(row['Quantity'])), 'C'), (str(row['Product Name']), 'L'), (f"{row['Transfer Price (Unit)']:.2f}", 'R'), (f"{row['Transfer Total']:.2f}", 'R')]
+        max_lines = 1
+        for i, (txt, align) in enumerate(d_row):
+            lines = get_lines(txt, w[i] - 2)
+            if lines > max_lines: max_lines = lines
+        row_h = max_lines * line_h
+        
+        if pdf.get_y() + row_h > 270:
+            pdf.add_page(); pdf.set_font("Helvetica", 'B', 7); pdf.set_fill_color(220, 220, 220)
+            for i, h in enumerate(headers): pdf.cell(w[i], 8, h, 1, 0, 'C', fill=True)
+            pdf.ln(); pdf.set_font("Helvetica", '', 7)
+            
+        y_curr = pdf.get_y(); x_curr = 10
+        for i, (txt, align) in enumerate(d_row):
+            pdf.set_xy(x_curr + sum(w[:i]), y_curr)
+            pdf.multi_cell(w[i], line_h, txt, 0, align)
+        pdf.set_xy(10, y_curr)
+        for i in range(len(w)): pdf.rect(10 + sum(w[:i]), y_curr, w[i], row_h)
+        pdf.set_y(y_curr + row_h)
+
     pdf.ln(2); pdf.set_font("Helvetica", 'B', 9); pdf.cell(sum(w[:-1]), 8, "TOTAL (USD):", 0, 0, 'R'); pdf.cell(w[-1], 8, f"${total_val:,.2f}", 1, 1, 'R')
     return bytes(pdf.output())
 
@@ -434,12 +591,43 @@ def generate_bol_pdf(df, inv_number, inv_date, shipper_txt, consignee_txt, carri
         for i, h in enumerate(headers): pdf.cell(w[i], 8, h, 1, 0, 'C', fill=True)
         pdf.ln()
         pdf.set_font("Helvetica", '', 9)
-        # Rows
-        row1 = ["", f"{pallets} PLT", "ROASTED COFFEE (NMFC 056820)", f"{total_weight_lbs:.1f} lbs", "60"]
-        for i, d in enumerate(row1): pdf.cell(w[i], 6, d, 1, 0, 'C' if i!=2 else 'L')
-        pdf.ln()
-        row2 = ["", f"{cartons} CTN", "(Contains roasted coffee in bags)", "", ""]
-        for i, d in enumerate(row2): pdf.cell(w[i], 6, d, 1, 0, 'C' if i!=2 else 'L')
+        
+        # Grid Row Helper with Wrapping
+        def print_grid_row(data_list):
+            def get_lines(text, width):
+                if not text: return 1
+                lines = 0; 
+                for para in str(text).split('\n'):
+                    if not para: lines += 1; continue
+                    words = para.split(' '); curr_w = 0; lines_para = 1
+                    for word in words:
+                        word_w = pdf.get_string_width(word + " ")
+                        if curr_w + word_w > width: lines_para += 1; curr_w = word_w
+                        else: curr_w += word_w
+                    lines += lines_para
+                return lines
+
+            line_h = 5; max_lines = 1
+            for i, (txt, align) in enumerate(data_list):
+                lines = get_lines(txt, w[i] - 2)
+                if lines > max_lines: max_lines = lines
+            row_h = max_lines * line_h
+            
+            y_start = pdf.get_y(); x_start = 10
+            for i, (txt, align) in enumerate(data_list):
+                current_x = x_start + sum(w[:i])
+                pdf.set_xy(current_x, y_start)
+                pdf.multi_cell(w[i], line_h, txt, 0, align)
+            pdf.set_xy(x_start, y_start)
+            for i in range(len(w)):
+                pdf.rect(x_start + sum(w[:i]), y_start, w[i], row_h)
+            pdf.set_xy(x_start, y_start + row_h)
+
+        row1 = [("", 'C'), (f"{pallets} PLT", 'C'), ("ROASTED COFFEE (NMFC 056820)", 'L'), (f"{total_weight_lbs:.1f} lbs", 'R'), ("60", 'C')]
+        print_grid_row(row1)
+        row2 = [("", 'C'), (f"{cartons} CTN", 'C'), ("(Contains roasted coffee in bags)", 'L'), ("", 'R'), ("", 'C')]
+        print_grid_row(row2)
+        
         pdf.ln(10)
         pdf.set_font("Helvetica", '', 8); legal = "RECEIVED, subject to the classifications and tariffs..."; pdf.multi_cell(0, 4, legal); pdf.ln(15)
         y_sig = pdf.get_y(); pdf.line(10, y_sig, 90, y_sig); pdf.line(110, y_sig, 190, y_sig)
@@ -500,7 +688,7 @@ if page == "Batches (Dashboard)":
         new_batch_name = st.text_input("Batch Name", value=f"Export-{date.today()}")
         if st.button("Create Batch"):
             create_batch(new_batch_name)
-            st.success("Batch created! Select it below.")
+            st.success("Batch created with previous settings! Select it below.")
             st.rerun()
     
     st.markdown("---")
@@ -524,7 +712,11 @@ if page == "Batches (Dashboard)":
             st.subheader("⚙️ Settings")
             st.markdown("**Signature**")
             saved_sig = get_setting('signature')
-            if saved_sig: st.success("Signature Loaded")
+            if saved_sig: 
+                st.success("Signature Loaded")
+                if st.button("🗑️ Clear Signature", key=f"clear_sig_{batch_id}"):
+                    clear_signature()
+                    st.rerun()
             else: 
                 sig_up = st.file_uploader("Upload Sig", type=['png','jpg'])
                 if sig_up: 
