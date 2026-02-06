@@ -417,16 +417,19 @@ def generate_si_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes,
         d_row = [(str(int(row['Quantity'])), 'C'), (str(row['Product Name']), 'L'), (f"{row['Transfer Price (Unit)']:.2f}", 'R'), (f"{row['Transfer Total']:.2f}", 'R')]
         max_lines = 1
         for i, (txt, align) in enumerate(d_row):
-            lines = get_lines(txt, w[i] - 2); 
+            lines = get_lines(txt, w[i] - 2)
             if lines > max_lines: max_lines = lines
         row_h = max_lines * line_h
+        
         if pdf.get_y() + row_h > 270:
             pdf.add_page(); pdf.set_font("Helvetica", 'B', 7); pdf.set_fill_color(220, 220, 220)
             for i, h in enumerate(headers): pdf.cell(w[i], 8, h, 1, 0, 'C', fill=True)
             pdf.ln(); pdf.set_font("Helvetica", '', 7)
+            
         y_curr = pdf.get_y(); x_curr = 10
         for i, (txt, align) in enumerate(d_row):
-            pdf.set_xy(x_curr + sum(w[:i]), y_curr); pdf.multi_cell(w[i], line_h, txt, 0, align)
+            pdf.set_xy(x_curr + sum(w[:i]), y_curr)
+            pdf.multi_cell(w[i], line_h, txt, 0, align)
         pdf.set_xy(10, y_curr)
         for i in range(len(w)): pdf.rect(10 + sum(w[:i]), y_curr, w[i], row_h)
         pdf.set_y(y_curr + row_h)
@@ -442,6 +445,7 @@ def generate_pl_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, carton
     pdf.set_xy(90, y_start); pdf.set_font("Helvetica", 'B', 10); pdf.cell(70, 5, "SHIP TO:", 0, 1); pdf.set_xy(90, pdf.get_y()); pdf.set_font("Helvetica", '', 9); pdf.multi_cell(70, 4, addr_ship)
     pdf.set_xy(160, y_start); pdf.set_font("Helvetica", 'B', 12); pdf.cell(40, 6, f"Packing List #: {inv_num}", 0, 1, 'R'); pdf.set_x(160); pdf.set_font("Helvetica", '', 10); pdf.cell(40, 6, f"Date: {inv_date}", 0, 1, 'R')
     y_mid = max(pdf.get_y(), 50) + 10; pdf.set_xy(10, y_mid); pdf.set_font("Helvetica", 'B', 10); pdf.cell(80, 5, "BILL TO:", 0, 1); pdf.set_x(10); pdf.set_font("Helvetica", '', 9); pdf.multi_cell(80, 4, addr_to); pdf.set_y(y_mid + 35)
+    
     w = [30, 160]; headers = ["QTY", "PRODUCT"]
     pdf.set_font("Helvetica", 'B', 7); pdf.set_fill_color(220, 220, 220)
     for i, h in enumerate(headers): pdf.cell(w[i], 8, h, 1, 0, 'C', fill=True)
@@ -465,16 +469,19 @@ def generate_pl_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, carton
         d_row = [(str(int(row['Quantity'])), 'C'), (str(row['Product Name']), 'L')]
         max_lines = 1
         for i, (txt, align) in enumerate(d_row):
-            lines = get_lines(txt, w[i] - 2); 
+            lines = get_lines(txt, w[i] - 2)
             if lines > max_lines: max_lines = lines
         row_h = max_lines * line_h
+        
         if pdf.get_y() + row_h > 270:
             pdf.add_page(); pdf.set_font("Helvetica", 'B', 7); pdf.set_fill_color(220, 220, 220)
             for i, h in enumerate(headers): pdf.cell(w[i], 8, h, 1, 0, 'C', fill=True)
             pdf.ln(); pdf.set_font("Helvetica", '', 7)
+            
         y_curr = pdf.get_y(); x_curr = 10
         for i, (txt, align) in enumerate(d_row):
-            pdf.set_xy(x_curr + sum(w[:i]), y_curr); pdf.multi_cell(w[i], line_h, txt, 0, align)
+            pdf.set_xy(x_curr + sum(w[:i]), y_curr)
+            pdf.multi_cell(w[i], line_h, txt, 0, align)
         pdf.set_xy(10, y_curr)
         for i in range(len(w)): pdf.rect(10 + sum(w[:i]), y_curr, w[i], row_h)
         pdf.set_y(y_curr + row_h)
@@ -490,6 +497,7 @@ def generate_po_pdf(df, inv_num, inv_date, addr_buyer, addr_vendor, addr_ship, t
     pdf.set_xy(90, y_start); pdf.set_font("Helvetica", 'B', 10); pdf.cell(70, 5, "SHIP TO:", 0, 1); pdf.set_xy(90, pdf.get_y()); pdf.set_font("Helvetica", '', 9); pdf.multi_cell(70, 4, addr_ship)
     pdf.set_xy(160, y_start); pdf.set_font("Helvetica", 'B', 12); pdf.cell(40, 6, f"Invoice #: {inv_num}", 0, 1, 'R'); pdf.set_x(160); pdf.set_font("Helvetica", '', 10); pdf.cell(40, 6, f"Date: {inv_date}", 0, 1, 'R'); pdf.set_x(160); pdf.cell(40, 6, "Currency: USD", 0, 1, 'R')
     y_mid = max(pdf.get_y(), 50) + 10; pdf.set_xy(10, y_mid); pdf.set_font("Helvetica", 'B', 10); pdf.cell(80, 5, "TO (VENDOR):", 0, 1); pdf.set_x(10); pdf.set_font("Helvetica", '', 9); pdf.multi_cell(80, 4, addr_vendor); pdf.set_y(y_mid + 35)
+    
     w = [20, 100, 35, 35]; headers = ["QTY", "PRODUCT", "UNIT ($)", "TOTAL ($)"]
     pdf.set_font("Helvetica", 'B', 7); pdf.set_fill_color(220, 220, 220)
     for i, h in enumerate(headers): pdf.cell(w[i], 8, h, 1, 0, 'C', fill=True)
@@ -513,16 +521,19 @@ def generate_po_pdf(df, inv_num, inv_date, addr_buyer, addr_vendor, addr_ship, t
         d_row = [(str(int(row['Quantity'])), 'C'), (str(row['Product Name']), 'L'), (f"{row['Transfer Price (Unit)']:.2f}", 'R'), (f"{row['Transfer Total']:.2f}", 'R')]
         max_lines = 1
         for i, (txt, align) in enumerate(d_row):
-            lines = get_lines(txt, w[i] - 2); 
+            lines = get_lines(txt, w[i] - 2)
             if lines > max_lines: max_lines = lines
         row_h = max_lines * line_h
+        
         if pdf.get_y() + row_h > 270:
             pdf.add_page(); pdf.set_font("Helvetica", 'B', 7); pdf.set_fill_color(220, 220, 220)
             for i, h in enumerate(headers): pdf.cell(w[i], 8, h, 1, 0, 'C', fill=True)
             pdf.ln(); pdf.set_font("Helvetica", '', 7)
+            
         y_curr = pdf.get_y(); x_curr = 10
         for i, (txt, align) in enumerate(d_row):
-            pdf.set_xy(x_curr + sum(w[:i]), y_curr); pdf.multi_cell(w[i], line_h, txt, 0, align)
+            pdf.set_xy(x_curr + sum(w[:i]), y_curr)
+            pdf.multi_cell(w[i], line_h, txt, 0, align)
         pdf.set_xy(10, y_curr)
         for i in range(len(w)): pdf.rect(10 + sum(w[:i]), y_curr, w[i], row_h)
         pdf.set_y(y_curr + row_h)
@@ -811,14 +822,14 @@ if page == "Batches (Dashboard)":
             csv_data = generate_customscity_csv(edited_df, b_inv_num, b_date, b_cons, hbol, carrier_code)
             
             c1, c2, c3, c4, c5 = st.columns(5)
-            with c1: st.download_button("CI PDF", pdf_ci, "CI.pdf", key=f"dl_ci_{batch_id}")
-            with c2: st.download_button("PO PDF", pdf_po, "PO.pdf", key=f"dl_po_{batch_id}")
-            with c3: st.download_button("SI PDF", pdf_si, "SI.pdf", key=f"dl_si_{batch_id}")
-            with c4: st.download_button("PL PDF", pdf_pl, "PL.pdf", key=f"dl_pl_{batch_id}")
-            with c5: st.download_button("BOL PDF", pdf_bol, "BOL.pdf", key=f"dl_bol_{batch_id}")
+            with c1: st.download_button("CI PDF", pdf_ci, f"CI-HRUS{base_id}.pdf", key=f"dl_ci_{batch_id}")
+            with c2: st.download_button("PO PDF", pdf_po, f"PO-HRUS{base_id}.pdf", key=f"dl_po_{batch_id}")
+            with c3: st.download_button("SI PDF", pdf_si, f"SI-HRUS{base_id}.pdf", key=f"dl_si_{batch_id}")
+            with c4: st.download_button("PL PDF", pdf_pl, f"PL-HRUS{base_id}.pdf", key=f"dl_pl_{batch_id}")
+            with c5: st.download_button("BOL PDF", pdf_bol, f"BOL-HRUS{base_id}.pdf", key=f"dl_bol_{batch_id}")
             
             c_csv_btn, c_csv_link = st.columns([1.5, 2])
-            with c_csv_btn: st.download_button("📥 CustomsCity CSV", csv_data, "upload.csv", type="primary", key=f"dl_csv_{batch_id}")
+            with c_csv_btn: st.download_button("📥 CustomsCity CSV", csv_data, f"CustomsCity_{base_id}.csv", type="primary", key=f"dl_csv_{batch_id}")
             with c_csv_link: st.markdown("""<div style="margin-top: 8px;"><a href="https://app.customscity.com/upload/document/" target="_blank" style="font-weight: 600; color: #6F4E37; text-decoration: none;">🚀 Upload to CustomsCity</a></div>""", unsafe_allow_html=True)
             
             # EMAIL CENTER
@@ -847,11 +858,11 @@ if page == "Batches (Dashboard)":
                     finalize_batch_in_db(batch_id)
                     
                     files_to_send = [
-                        {'name': f"{base_id}_CI.pdf", 'data': pdf_ci},
-                        {'name': f"{base_id}_PO.pdf", 'data': pdf_po},
-                        {'name': f"{base_id}_SI.pdf", 'data': pdf_si},
-                        {'name': f"{base_id}_PL.pdf", 'data': pdf_pl},
-                        {'name': f"{base_id}_BOL.pdf", 'data': pdf_bol},
+                        {'name': f"CI-HRUS{base_id}.pdf", 'data': pdf_ci},
+                        {'name': f"PO-HRUS{base_id}.pdf", 'data': pdf_po},
+                        {'name': f"SI-HRUS{base_id}.pdf", 'data': pdf_si},
+                        {'name': f"PL-HRUS{base_id}.pdf", 'data': pdf_pl},
+                        {'name': f"BOL-HRUS{base_id}.pdf", 'data': pdf_bol},
                         {'name': f"CustomsCity_{base_id}.csv", 'data': csv_data}
                     ]
                     if attach_backup and os.path.exists('invoices.db'):
