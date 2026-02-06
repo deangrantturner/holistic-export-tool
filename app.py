@@ -58,13 +58,20 @@ def init_db():
                   description TEXT,
                   hts_code TEXT,
                   fda_code TEXT,
-                  weight_lbs REAL)''')
+                  weight_lbs REAL,
+                  unit_price REAL,
+                  country_of_origin TEXT)''') # Added country_of_origin
     
-    # MIGRATION: Add unit_price if missing
+    # MIGRATION: Add columns if missing
     try:
         c.execute("ALTER TABLE product_catalog_v3 ADD COLUMN unit_price REAL")
     except:
         pass 
+    
+    try:
+        c.execute("ALTER TABLE product_catalog_v3 ADD COLUMN country_of_origin TEXT")
+    except:
+        pass
     
     c.execute('''CREATE TABLE IF NOT EXISTS settings
                  (key TEXT PRIMARY KEY,
@@ -101,22 +108,24 @@ def upsert_catalog_from_df(df):
         p_name = row.get('product_name', '')
         desc = row.get('description', '')
         weight = row.get('weight_lbs', 0.0)
-        price = row.get('unit_price', 0.0) # NEW
+        price = row.get('unit_price', 0.0)
+        origin = row.get('country_of_origin', 'CA') # Default CA if missing
         
         try: weight = float(weight)
         except: weight = 0.0
         
-        try: price = float(price) # NEW
+        try: price = float(price)
         except: price = 0.0
 
         if pd.isna(desc) or desc == "": desc = p_name
+        if pd.isna(origin) or origin == "": origin = "CA"
         
         sku_val = clean_sku(row['sku'])
         
         c.execute("""INSERT OR REPLACE INTO product_catalog_v3 
-                     (sku, product_name, description, hts_code, fda_code, weight_lbs, unit_price) 
-                     VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                  (sku_val, p_name, desc, str(row['hts_code']), str(row['fda_code']), weight, price))
+                     (sku, product_name, description, hts_code, fda_code, weight_lbs, unit_price, country_of_origin) 
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                  (sku_val, p_name, desc, str(row['hts_code']), str(row['fda_code']), weight, price, str(origin)))
     conn.commit()
     conn.close()
 
@@ -170,7 +179,7 @@ def create_batch(name):
     new_data = {
         "inv_number": f"{date.today().strftime('%Y%m%d')}1",
         "inv_date": str(date.today()),
-        # DISCOUNT REMOVED
+        "discount": 75.0,
         "consignee": def_cons,
         "notes": def_notes,
         "carrier": def_carrier,
