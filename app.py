@@ -60,18 +60,13 @@ def init_db():
                   fda_code TEXT,
                   weight_lbs REAL,
                   unit_price REAL,
-                  country_of_origin TEXT)''') # Added country_of_origin
+                  country_of_origin TEXT)''')
     
-    # MIGRATION: Add columns if missing
-    try:
-        c.execute("ALTER TABLE product_catalog_v3 ADD COLUMN unit_price REAL")
-    except:
-        pass 
-    
-    try:
-        c.execute("ALTER TABLE product_catalog_v3 ADD COLUMN country_of_origin TEXT")
-    except:
-        pass
+    # MIGRATIONS
+    try: c.execute("ALTER TABLE product_catalog_v3 ADD COLUMN unit_price REAL")
+    except: pass 
+    try: c.execute("ALTER TABLE product_catalog_v3 ADD COLUMN country_of_origin TEXT")
+    except: pass
     
     c.execute('''CREATE TABLE IF NOT EXISTS settings
                  (key TEXT PRIMARY KEY,
@@ -84,7 +79,6 @@ def init_db():
                   created_at TEXT,
                   updated_at TEXT,
                   data TEXT)''')
-                  
     conn.commit()
     conn.close()
 
@@ -109,11 +103,10 @@ def upsert_catalog_from_df(df):
         desc = row.get('description', '')
         weight = row.get('weight_lbs', 0.0)
         price = row.get('unit_price', 0.0)
-        origin = row.get('country_of_origin', 'CA') # Default CA if missing
+        origin = row.get('country_of_origin', 'CA')
         
         try: weight = float(weight)
         except: weight = 0.0
-        
         try: price = float(price)
         except: price = 0.0
 
@@ -343,7 +336,7 @@ class ProInvoice(FPDF):
         self.set_font('Helvetica', 'I', 8)
         self.cell(0, 10, f'Page {self.page_no()} of {{nb}}', 0, 0, 'R')
 
-# --- PDF Generators (UPDATED WITH TEXT WRAPPING) ---
+# --- PDF Generators (UPDATED WITH ORIGIN COLUMN) ---
 def generate_ci_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes, total_val, sig_bytes=None, signer_name="Dean Turner"):
     pdf = ProInvoice(); pdf.alias_nb_pages(); pdf.add_page(); pdf.set_auto_page_break(auto=False)
     pdf.set_font('Helvetica', 'B', 20); pdf.cell(0, 10, doc_type, 0, 1, 'C'); pdf.ln(5)
@@ -358,7 +351,8 @@ def generate_ci_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_sh
     
     pdf.set_xy(160, y_start); pdf.set_font("Helvetica", 'B', 12); pdf.cell(40, 6, f"Invoice #: {inv_num}", 0, 1, 'R')
     pdf.set_x(160); pdf.set_font("Helvetica", '', 10); pdf.cell(40, 6, f"Date: {inv_date}", 0, 1, 'R')
-    pdf.set_x(160); pdf.cell(40, 6, "Currency: USD", 0, 1, 'R'); pdf.set_x(160); pdf.cell(40, 6, "Origin: CANADA", 0, 1, 'R')
+    # Removed Origin from top right
+    pdf.set_x(160); pdf.cell(40, 6, "Currency: USD", 0, 1, 'R')
     
     y_mid = max(pdf.get_y(), 60) + 10
     pdf.set_xy(10, y_mid); pdf.set_font("Helvetica", 'B', 10); pdf.cell(80, 5, "IMPORTER OF RECORD:", 0, 1)
@@ -368,8 +362,8 @@ def generate_ci_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_sh
     pdf.set_xy(102, y_mid + 2); pdf.set_font("Helvetica", 'B', 9); pdf.cell(50, 5, "NOTES / BROKER / FDA:", 0, 1)
     pdf.set_xy(102, pdf.get_y()); pdf.set_font("Helvetica", '', 8); pdf.multi_cell(90, 4, notes); pdf.set_y(y_mid + 35)
     
-    # Table Header
-    w = [12, 40, 45, 23, 23, 22, 25]; headers = ["QTY", "PRODUCT", "DESCRIPTION", "HTS #", "FDA CODE", "UNIT ($)", "TOTAL ($)"]
+    # Table Header (Rebalanced for Origin Column)
+    w = [10, 35, 42, 22, 20, 16, 20, 25]; headers = ["QTY", "PRODUCT", "DESCRIPTION", "HTS #", "FDA", "ORIGIN", "UNIT ($)", "TOTAL ($)"]
     pdf.set_font("Helvetica", 'B', 7); pdf.set_fill_color(220, 220, 220)
     for i, h in enumerate(headers): pdf.cell(w[i], 8, h, 1, 0, 'C', fill=True)
     pdf.ln(); pdf.set_font("Helvetica", '', 7)
@@ -391,13 +385,16 @@ def generate_ci_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_sh
 
     line_h = 5
     for _, row in df.iterrows():
-        # Prepare Data Row with Alignment
+        # Get Origin, default CA
+        origin = str(row.get('country_of_origin', 'CA'))
+        
         d_row = [
             (str(int(row['Quantity'])), 'C'), 
             (str(row['Product Name']), 'L'), 
             (str(row['Description']), 'L'),
             (str(row.get('HTS Code','')), 'C'), 
             (str(row.get('FDA Code','')), 'C'),
+            (origin, 'C'), 
             (f"{row['Transfer Price (Unit)']:.2f}", 'R'), 
             (f"{row['Transfer Total']:.2f}", 'R')
         ]
@@ -803,9 +800,12 @@ if page == "Batches (Dashboard)":
                             merged['FDA Code'] = merged['fda_code'].fillna(DEFAULT_FDA)
                             merged['Weight (lbs)'] = merged['weight_lbs'].fillna(0.0)
                             
-                            # NEW PRICE LOGIC: Use Catalog Price if available, else CSV Price
+                            # NEW PRICE LOGIC
                             merged['unit_price'] = pd.to_numeric(merged['unit_price'], errors='coerce').fillna(0.0)
                             merged['Transfer Price (Unit)'] = merged.apply(lambda x: x['unit_price'] if x['unit_price'] > 0 else x['CSV_Price'], axis=1)
+                            
+                            # ORIGIN LOGIC
+                            if 'country_of_origin' not in merged.columns: merged['country_of_origin'] = "CA"
                             
                             df = merged 
                         else:
@@ -815,6 +815,7 @@ if page == "Batches (Dashboard)":
                             sales_data['FDA Code'] = DEFAULT_FDA
                             sales_data['Weight (lbs)'] = 0.0
                             sales_data['Transfer Price (Unit)'] = sales_data['CSV_Price']
+                            sales_data['country_of_origin'] = "CA"
                             df = sales_data
                     else:
                         st.error("Invalid CSV"); df = pd.DataFrame()
@@ -825,8 +826,10 @@ if page == "Batches (Dashboard)":
                 # Calculate Total using FIXED PRICE (No Discount)
                 df['Transfer Total'] = df['Quantity'] * df['Transfer Price (Unit)']
                 
+                # AGGREGATE
                 consolidated = df.groupby(['Variant code / SKU', 'Product Name', 'Description']).agg({
-                    'Quantity': 'sum', 'HTS Code': 'first', 'FDA Code': 'first', 'Weight (lbs)': 'first',
+                    'Quantity': 'sum', 'HTS Code': 'first', 'FDA Code': 'first', 
+                    'Weight (lbs)': 'first', 'country_of_origin': 'first', # AGG ORIGIN
                     'Transfer Price (Unit)': 'mean', 'Transfer Total': 'sum'
                 }).reset_index()
                 
