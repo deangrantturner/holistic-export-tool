@@ -96,29 +96,67 @@ def get_catalog():
     return df
 
 def upsert_catalog_from_df(df):
+    # 1. Normalize Headers (Lower case, stripped)
+    df.columns = df.columns.str.strip().str.lower()
+    
+    # 2. Smart Map common aliases to our DB column names
+    col_map = {
+        'price': 'unit_price', 'cost': 'unit_price', 'unit price': 'unit_price',
+        'origin': 'country_of_origin', 'country': 'country_of_origin', 'coo': 'country_of_origin', 'country of origin': 'country_of_origin',
+        'weight': 'weight_lbs', 'lbs': 'weight_lbs', 'weight (lbs)': 'weight_lbs',
+        'sku': 'sku', 'variant code': 'sku', 'variant code / sku': 'sku',
+        'product': 'product_name', 'name': 'product_name', 'item variant': 'product_name',
+        'desc': 'description', 'description': 'description',
+        'hts': 'hts_code', 'hs code': 'hts_code', 'hts code': 'hts_code',
+        'fda': 'fda_code', 'fda code': 'fda_code'
+    }
+    
+    # Rename columns based on map
+    renamed_cols = {}
+    for col in df.columns:
+        if col in col_map:
+            renamed_cols[col] = col_map[col]
+    df.rename(columns=renamed_cols, inplace=True)
+
     conn = sqlite3.connect('invoices.db')
     c = conn.cursor()
+    
     for _, row in df.iterrows():
+        # Safe Getters with Smart Defaults
         p_name = row.get('product_name', '')
         desc = row.get('description', '')
-        weight = row.get('weight_lbs', 0.0)
-        price = row.get('unit_price', 0.0)
-        origin = row.get('country_of_origin', 'CA')
         
+        # Numeric Cleanups
+        weight = row.get('weight_lbs', 0.0)
         try: weight = float(weight)
         except: weight = 0.0
+        
+        price = row.get('unit_price', 0.0)
         try: price = float(price)
         except: price = 0.0
-
-        if pd.isna(desc) or desc == "": desc = p_name
+        
+        origin = row.get('country_of_origin', 'CA')
         if pd.isna(origin) or origin == "": origin = "CA"
+
+        if pd.isna(p_name): p_name = ""
+        if pd.isna(desc) or desc == "": desc = p_name
         
-        sku_val = clean_sku(row['sku'])
+        # SKU Check
+        raw_sku = row.get('sku', '')
+        sku_val = clean_sku(raw_sku)
         
-        c.execute("""INSERT OR REPLACE INTO product_catalog_v3 
-                     (sku, product_name, description, hts_code, fda_code, weight_lbs, unit_price, country_of_origin) 
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                  (sku_val, p_name, desc, str(row['hts_code']), str(row['fda_code']), weight, price, str(origin)))
+        if sku_val: # Only insert if SKU exists
+            c.execute("""INSERT OR REPLACE INTO product_catalog_v3 
+                         (sku, product_name, description, hts_code, fda_code, weight_lbs, unit_price, country_of_origin) 
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                      (sku_val, p_name, desc, str(row.get('hts_code', '')), str(row.get('fda_code', '')), weight, price, str(origin)))
+    conn.commit()
+    conn.close()
+
+def clear_catalog():
+    conn = sqlite3.connect('invoices.db')
+    c = conn.cursor()
+    c.execute("DELETE FROM product_catalog_v3")
     conn.commit()
     conn.close()
 
@@ -351,7 +389,6 @@ def generate_ci_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_sh
     
     pdf.set_xy(160, y_start); pdf.set_font("Helvetica", 'B', 12); pdf.cell(40, 6, f"Invoice #: {inv_num}", 0, 1, 'R')
     pdf.set_x(160); pdf.set_font("Helvetica", '', 10); pdf.cell(40, 6, f"Date: {inv_date}", 0, 1, 'R')
-    # Removed Origin from top right
     pdf.set_x(160); pdf.cell(40, 6, "Currency: USD", 0, 1, 'R')
     
     y_mid = max(pdf.get_y(), 60) + 10
@@ -934,22 +971,35 @@ elif page == "Catalog":
     st.header("📦 Product Catalog")
     st.info("Updates here apply to NEW uploads/batches.")
     
-    c1, c2 = st.columns(2)
+    c1, c2, c3 = st.columns(3)
     with c1:
+        # Create Template
+        template_df = pd.DataFrame(columns=['sku', 'product_name', 'description', 'hts_code', 'fda_code', 'weight_lbs', 'unit_price', 'country_of_origin'])
+        st.download_button("Download Template", template_df.to_csv(index=False).encode(), "catalog_template.csv", key="cat_dl_temp")
+        
         curr_cat = get_catalog()
-        if not curr_cat.empty: st.download_button("Download Catalog", curr_cat.to_csv(index=False).encode(), "catalog.csv", key="cat_dl_btn")
+        if not curr_cat.empty: st.download_button("Download Current Catalog", curr_cat.to_csv(index=False).encode(), "catalog.csv", key="cat_dl_btn")
     with c2:
         up_cat = st.file_uploader("Upload Catalog", type=['csv'])
         if up_cat:
             upsert_catalog_from_df(pd.read_csv(up_cat))
             st.success("Updated!"); show_backup_prompt("cat_up"); st.rerun()
             
+    with c3:
+        if st.button("⚠️ Clear Catalog"):
+            clear_catalog()
+            st.rerun()
+            
     if not curr_cat.empty:
-        edited = st.data_editor(curr_cat, num_rows="dynamic",
-                                column_config={
-                                    "unit_price": st.column_config.NumberColumn("Price ($)", format="$%.2f"),
-                                    "weight_lbs": st.column_config.NumberColumn("Weight (lbs)", format="%.2f")
-                                })
+        edited = st.data_editor(
+            curr_cat, 
+            num_rows="dynamic",
+            column_config={
+                "unit_price": st.column_config.NumberColumn("Price ($)", format="$%.2f"),
+                "weight_lbs": st.column_config.NumberColumn("Weight (lbs)", format="%.2f"),
+                "country_of_origin": st.column_config.TextColumn("Origin (e.g. CA)")
+            }
+        )
         if st.button("💾 Save Catalog Changes"):
             upsert_catalog_from_df(edited)
             st.success("Saved! NOW DOWNLOAD BACKUP ->"); show_backup_prompt("cat_save")
