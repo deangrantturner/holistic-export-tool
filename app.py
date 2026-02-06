@@ -60,6 +60,12 @@ def init_db():
                   fda_code TEXT,
                   weight_lbs REAL)''')
     
+    # MIGRATION: Add unit_price if missing
+    try:
+        c.execute("ALTER TABLE product_catalog_v3 ADD COLUMN unit_price REAL")
+    except:
+        pass 
+    
     c.execute('''CREATE TABLE IF NOT EXISTS settings
                  (key TEXT PRIMARY KEY,
                   value BLOB)''')
@@ -95,16 +101,22 @@ def upsert_catalog_from_df(df):
         p_name = row.get('product_name', '')
         desc = row.get('description', '')
         weight = row.get('weight_lbs', 0.0)
+        price = row.get('unit_price', 0.0) # NEW
+        
         try: weight = float(weight)
         except: weight = 0.0
+        
+        try: price = float(price) # NEW
+        except: price = 0.0
+
         if pd.isna(desc) or desc == "": desc = p_name
         
         sku_val = clean_sku(row['sku'])
         
         c.execute("""INSERT OR REPLACE INTO product_catalog_v3 
-                     (sku, product_name, description, hts_code, fda_code, weight_lbs) 
-                     VALUES (?, ?, ?, ?, ?, ?)""",
-                  (sku_val, p_name, desc, str(row['hts_code']), str(row['fda_code']), weight))
+                     (sku, product_name, description, hts_code, fda_code, weight_lbs, unit_price) 
+                     VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                  (sku_val, p_name, desc, str(row['hts_code']), str(row['fda_code']), weight, price))
     conn.commit()
     conn.close()
 
@@ -158,7 +170,7 @@ def create_batch(name):
     new_data = {
         "inv_number": f"{date.today().strftime('%Y%m%d')}1",
         "inv_date": str(date.today()),
-        "discount": 75.0,
+        # DISCOUNT REMOVED
         "consignee": def_cons,
         "notes": def_notes,
         "carrier": def_carrier,
@@ -173,7 +185,6 @@ def create_batch(name):
         row = c.fetchone()
         if row:
             last_data = json.loads(row[0])
-            if 'discount' in last_data: new_data['discount'] = last_data['discount']
             if 'consignee' in last_data and last_data['consignee']: new_data['consignee'] = last_data['consignee']
             if 'notes' in last_data and last_data['notes']: new_data['notes'] = last_data['notes']
             if 'carrier' in last_data: new_data['carrier'] = last_data['carrier']
@@ -740,7 +751,7 @@ if page == "Batches (Dashboard)":
             with c1:
                 b_inv_num = st.text_input("Invoice #", value=batch_data.get('inv_number', ''))
                 b_date = st.date_input("Date", value=datetime.strptime(batch_data.get('inv_date', str(date.today())), "%Y-%m-%d"))
-                b_discount = st.number_input("Transfer Discount %", value=batch_data.get('discount', 75.0))
+                # DISCOUNT REMOVED
             
             with c2:
                 b_cons = st.text_area("Consignee", value=batch_data.get('consignee', ""), height=100)
@@ -768,9 +779,10 @@ if page == "Batches (Dashboard)":
                         if 'Item type' in df.columns: us_shipments = us_shipments[us_shipments['Item type'] == 'product']
                         
                         sales_data = us_shipments[['Variant code / SKU', 'Item variant', 'Quantity', 'Price per unit']].copy()
-                        # CLEAN SKU (String and Strip .0)
-                        sales_data['Variant code / SKU'] = sales_data['Variant code / SKU'].apply(clean_sku)
-                        sales_data['Price per unit'] = pd.to_numeric(sales_data['Price per unit'], errors='coerce').fillna(0)
+                        sales_data['Variant code / SKU'] = sales_data['Variant code / SKU'].astype(str).str.strip()
+                        
+                        # Price per unit from CSV used as fallback
+                        sales_data['CSV_Price'] = pd.to_numeric(sales_data['Price per unit'], errors='coerce').fillna(0)
                         
                         if not cat_check.empty:
                             # Clean Catalog SKUs too
@@ -781,6 +793,11 @@ if page == "Batches (Dashboard)":
                             merged['HTS Code'] = merged['hts_code'].fillna(DEFAULT_HTS)
                             merged['FDA Code'] = merged['fda_code'].fillna(DEFAULT_FDA)
                             merged['Weight (lbs)'] = merged['weight_lbs'].fillna(0.0)
+                            
+                            # NEW PRICE LOGIC: Use Catalog Price if available, else CSV Price
+                            merged['unit_price'] = pd.to_numeric(merged['unit_price'], errors='coerce').fillna(0.0)
+                            merged['Transfer Price (Unit)'] = merged.apply(lambda x: x['unit_price'] if x['unit_price'] > 0 else x['CSV_Price'], axis=1)
+                            
                             df = merged 
                         else:
                             sales_data['Product Name'] = sales_data['Item variant']
@@ -788,6 +805,7 @@ if page == "Batches (Dashboard)":
                             sales_data['HTS Code'] = DEFAULT_HTS
                             sales_data['FDA Code'] = DEFAULT_FDA
                             sales_data['Weight (lbs)'] = 0.0
+                            sales_data['Transfer Price (Unit)'] = sales_data['CSV_Price']
                             df = sales_data
                     else:
                         st.error("Invalid CSV"); df = pd.DataFrame()
@@ -795,8 +813,7 @@ if page == "Batches (Dashboard)":
                     df = pd.DataFrame()
 
             if not df.empty:
-                app_discount_decimal = b_discount / 100.0
-                df['Transfer Price (Unit)'] = df['Price per unit'] * (1 - app_discount_decimal)
+                # Calculate Total using FIXED PRICE (No Discount)
                 df['Transfer Total'] = df['Quantity'] * df['Transfer Price (Unit)']
                 
                 consolidated = df.groupby(['Variant code / SKU', 'Product Name', 'Description']).agg({
@@ -804,7 +821,14 @@ if page == "Batches (Dashboard)":
                     'Transfer Price (Unit)': 'mean', 'Transfer Total': 'sum'
                 }).reset_index()
                 
-                edited_df = st.data_editor(consolidated, num_rows="dynamic")
+                edited_df = st.data_editor(
+                    consolidated, 
+                    num_rows="dynamic",
+                    column_config={
+                        "Transfer Price (Unit)": st.column_config.NumberColumn("Unit Price ($)", format="$%.2f"),
+                        "Transfer Total": st.column_config.NumberColumn("Total ($)", format="$%.2f")
+                    }
+                )
                 total_val = edited_df['Transfer Total'].sum()
                 st.metric("Total Value", f"${total_val:,.2f}")
                 
@@ -819,7 +843,8 @@ if page == "Batches (Dashboard)":
                 
                 if st.button("💾 SAVE BATCH PROGRESS", type="primary"):
                     save_data = {
-                        "inv_number": b_inv_num, "inv_date": str(b_date), "discount": b_discount,
+                        "inv_number": b_inv_num, "inv_date": str(b_date), 
+                        # Discount removed from save
                         "consignee": b_cons, "notes": b_notes, "carrier": sel_carrier,
                         "pallets": pallets, "cartons": cartons, "gross_weight": gross_weight,
                         "orders_json": edited_df.to_json(orient='split')
@@ -908,7 +933,11 @@ elif page == "Catalog":
             st.success("Updated!"); show_backup_prompt("cat_up"); st.rerun()
             
     if not curr_cat.empty:
-        edited = st.data_editor(curr_cat, num_rows="dynamic")
+        edited = st.data_editor(curr_cat, num_rows="dynamic",
+                                column_config={
+                                    "unit_price": st.column_config.NumberColumn("Price ($)", format="$%.2f"),
+                                    "weight_lbs": st.column_config.NumberColumn("Weight (lbs)", format="%.2f")
+                                })
         if st.button("💾 Save Catalog Changes"):
             upsert_catalog_from_df(edited)
             st.success("Saved! NOW DOWNLOAD BACKUP ->"); show_backup_prompt("cat_save")
