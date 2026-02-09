@@ -445,7 +445,6 @@ def generate_pl_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, carton
     pdf.set_xy(90, y_start); pdf.set_font("Helvetica", 'B', 10); pdf.cell(70, 5, "SHIP TO:", 0, 1); pdf.set_xy(90, pdf.get_y()); pdf.set_font("Helvetica", '', 9); pdf.multi_cell(70, 4, addr_ship)
     pdf.set_xy(160, y_start); pdf.set_font("Helvetica", 'B', 12); pdf.cell(40, 6, f"Packing List #: {inv_num}", 0, 1, 'R'); pdf.set_x(160); pdf.set_font("Helvetica", '', 10); pdf.cell(40, 6, f"Date: {inv_date}", 0, 1, 'R')
     y_mid = max(pdf.get_y(), 50) + 10; pdf.set_xy(10, y_mid); pdf.set_font("Helvetica", 'B', 10); pdf.cell(80, 5, "BILL TO:", 0, 1); pdf.set_x(10); pdf.set_font("Helvetica", '', 9); pdf.multi_cell(80, 4, addr_to); pdf.set_y(y_mid + 35)
-    
     w = [30, 160]; headers = ["QTY", "PRODUCT"]
     pdf.set_font("Helvetica", 'B', 7); pdf.set_fill_color(220, 220, 220)
     for i, h in enumerate(headers): pdf.cell(w[i], 8, h, 1, 0, 'C', fill=True)
@@ -717,25 +716,34 @@ if page == "Batches (Dashboard)":
 
             saved_orders_json = batch_data.get('orders_json')
             
-            if saved_orders_json:
-                st.success("Loaded saved orders from batch.")
-                df = pd.read_json(io.StringIO(saved_orders_json), orient='split')
-            else:
-                uploaded_file = st.file_uploader("Upload CSV", type=['csv'])
-                if uploaded_file:
-                    df = pd.read_csv(uploaded_file)
-                    if 'Ship to country' in df.columns:
-                        us_shipments = df[df['Ship to country'] == 'United States'].copy()
-                        if 'Item type' in df.columns: us_shipments = us_shipments[us_shipments['Item type'] == 'product']
+            uploaded_file = st.file_uploader("Upload CSV", type=['csv'])
+            
+            # --- PARSE CSV OR LOAD JSON ---
+            df = pd.DataFrame()
+            unique_orders_count = 1  # Default default
+            
+            if uploaded_file:
+                # 1. NEW UPLOAD LOGIC
+                try:
+                    raw_df = pd.read_csv(uploaded_file)
+                    if 'Ship to country' in raw_df.columns:
+                        us_shipments = raw_df[raw_df['Ship to country'] == 'United States'].copy()
+                        if 'Item type' in raw_df.columns: us_shipments = us_shipments[us_shipments['Item type'] == 'product']
                         
+                        # --- COUNT UNIQUE ORDERS HERE ---
+                        # Try to find an order column
+                        possible_cols = ['SO #', 'Name', 'Order Name', 'Order Number']
+                        order_col = next((col for col in possible_cols if col in us_shipments.columns), None)
+                        if order_col:
+                            unique_orders_count = us_shipments[order_col].nunique()
+                        
+                        # Prepare Sales Data
                         sales_data = us_shipments[['Variant code / SKU', 'Item variant', 'Quantity', 'Price per unit']].copy()
                         sales_data['Variant code / SKU'] = sales_data['Variant code / SKU'].astype(str).str.strip()
-                        
-                        # Price per unit from CSV used as fallback
                         sales_data['CSV_Price'] = pd.to_numeric(sales_data['Price per unit'], errors='coerce').fillna(0)
                         
+                        # Merge with Catalog
                         if not cat_check.empty:
-                            # Clean Catalog SKUs too
                             cat_check['sku'] = cat_check['sku'].apply(clean_sku)
                             merged = pd.merge(sales_data, cat_check, left_on='Variant code / SKU', right_on='sku', how='left')
                             merged['Product Name'] = merged['product_name'].fillna(merged['Item variant'])
@@ -743,14 +751,9 @@ if page == "Batches (Dashboard)":
                             merged['HTS Code'] = merged['hts_code'].fillna(DEFAULT_HTS)
                             merged['FDA Code'] = merged['fda_code'].fillna(DEFAULT_FDA)
                             merged['Weight (lbs)'] = merged['weight_lbs'].fillna(0.0)
-                            
-                            # NEW PRICE LOGIC
                             merged['unit_price'] = pd.to_numeric(merged['unit_price'], errors='coerce').fillna(0.0)
                             merged['Transfer Price (Unit)'] = merged.apply(lambda x: x['unit_price'] if x['unit_price'] > 0 else x['CSV_Price'], axis=1)
-                            
-                            # ORIGIN LOGIC
                             if 'country_of_origin' not in merged.columns: merged['country_of_origin'] = "CA"
-                            
                             df = merged 
                         else:
                             sales_data['Product Name'] = sales_data['Item variant']
@@ -763,8 +766,15 @@ if page == "Batches (Dashboard)":
                             df = sales_data
                     else:
                         st.error("Invalid CSV"); df = pd.DataFrame()
-                else:
-                    df = pd.DataFrame()
+                except Exception as e:
+                    st.error(f"Error reading CSV: {e}")
+            
+            elif saved_orders_json:
+                # 2. LOAD SAVED LOGIC
+                try:
+                    df = pd.read_json(io.StringIO(saved_orders_json), orient='split')
+                except:
+                    st.error("Failed to load saved orders."); df = pd.DataFrame()
 
         # ORDERS TABLE (FULL WIDTH NOW)
         st.markdown("---")
@@ -790,12 +800,36 @@ if page == "Batches (Dashboard)":
             total_val = edited_df['Transfer Total'].sum()
             st.metric("Total Value", f"${total_val:,.2f}")
             
+            # --- LOGISTICS CALCULATIONS ---
             c_log1, c_log2, c_log3 = st.columns(3)
-            with c_log1: pallets = st.number_input("Pallets", value=batch_data.get('pallets', 1))
-            with c_log2: cartons = st.number_input("Cartons", value=batch_data.get('cartons', 1))
+            
+            with c_log1: 
+                pallets = st.number_input("Pallets", value=batch_data.get('pallets', 1))
+            
+            # CARTONS LOGIC
+            saved_cartons = batch_data.get('cartons', 1)
+            # If we just uploaded a fresh CSV (uploaded_file is not None) and found >1 unique orders, use that count.
+            # Otherwise fall back to saved value.
+            if uploaded_file and unique_orders_count > 1:
+                default_cartons = unique_orders_count
+            else:
+                default_cartons = saved_cartons
+                
+            with c_log2: 
+                cartons = st.number_input("Cartons", value=default_cartons)
+            
+            # WEIGHT LOGIC
+            calc_w = (edited_df['Quantity'] * edited_df['Weight (lbs)']).sum()
+            saved_gw = batch_data.get('gross_weight', 0.0)
+            
+            # If never saved (0.0) OR fresh upload, use calculated.
+            if saved_gw == 0.0 or uploaded_file:
+                default_gw = calc_w + (pallets * 40)
+            else:
+                default_gw = saved_gw
+                
             with c_log3: 
-                calc_w = (edited_df['Quantity'] * edited_df['Weight (lbs)']).sum()
-                gross_weight = st.number_input("Gross Weight", value=batch_data.get('gross_weight', calc_w))
+                gross_weight = st.number_input("Gross Weight", value=float(default_gw))
 
             st.markdown("---")
             
@@ -858,11 +892,11 @@ if page == "Batches (Dashboard)":
                     finalize_batch_in_db(batch_id)
                     
                     files_to_send = [
-                        {'name': f"CI-HRUS{base_id}.pdf", 'data': pdf_ci},
-                        {'name': f"PO-HRUS{base_id}.pdf", 'data': pdf_po},
-                        {'name': f"SI-HRUS{base_id}.pdf", 'data': pdf_si},
-                        {'name': f"PL-HRUS{base_id}.pdf", 'data': pdf_pl},
-                        {'name': f"BOL-HRUS{base_id}.pdf", 'data': pdf_bol},
+                        {'name': f"{base_id}_CI.pdf", 'data': pdf_ci},
+                        {'name': f"{base_id}_PO.pdf", 'data': pdf_po},
+                        {'name': f"{base_id}_SI.pdf", 'data': pdf_si},
+                        {'name': f"{base_id}_PL.pdf", 'data': pdf_pl},
+                        {'name': f"{base_id}_BOL.pdf", 'data': pdf_bol},
                         {'name': f"CustomsCity_{base_id}.csv", 'data': csv_data}
                     ]
                     if attach_backup and os.path.exists('invoices.db'):
