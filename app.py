@@ -29,7 +29,8 @@ DEF_CONS_ADDR = "c/o FedEx Ship Center\n1049 US-11"
 DEF_CONS_CITY = "Champlain"
 DEF_CONS_STATE = "NY"
 DEF_CONS_ZIP = "12919"
-DEFAULT_CONSIGNEE_FULL = "Holistic Roasters Client\nc/o FedEx Ship Center\n1049 US-11\nChamplain, NY 12919, United States"
+DEF_CONS_OTHER = "IRS# 00-0000000"
+DEFAULT_CONSIGNEE_FULL = "Holistic Roasters Client\nc/o FedEx Ship Center\n1049 US-11\nChamplain, NY 12919\nIRS# 00-0000000\nUnited States"
 
 DEFAULT_IMPORTER = """Holistic Roasters USA
 30 N Gould St, STE R
@@ -55,7 +56,6 @@ def init_db():
                   total_value REAL,
                   buyer_name TEXT)''')
     
-    # Updated Schema with product_id
     c.execute('''CREATE TABLE IF NOT EXISTS product_catalog_v3
                  (sku TEXT PRIMARY KEY,
                   product_name TEXT,
@@ -128,7 +128,7 @@ def upsert_catalog_from_df(df):
         weight = row.get('weight_lbs', 0.0)
         price = row.get('unit_price', 0.0)
         origin = row.get('country_of_origin', 'CA')
-        prod_id = row.get('product_id', '') # New Field
+        prod_id = row.get('product_id', '')
 
         if pd.isna(origin) or origin == "": origin = "CA"
         try: weight = float(weight)
@@ -139,7 +139,6 @@ def upsert_catalog_from_df(df):
         
         sku_val = clean_sku(row.get('sku', ''))
         
-        # If product_id is missing in CSV, fallback to SKU
         if pd.isna(prod_id) or str(prod_id).strip() == "":
             prod_id = sku_val
 
@@ -212,6 +211,7 @@ def create_batch(name):
         "cons_city": DEF_CONS_CITY,
         "cons_state": DEF_CONS_STATE,
         "cons_zip": DEF_CONS_ZIP,
+        "cons_other": DEF_CONS_OTHER,
         "notes": def_notes,
         "carrier": def_carrier,
         "pallets": 1,
@@ -226,11 +226,11 @@ def create_batch(name):
         if row:
             last_data = json.loads(row[0])
             if 'cons_name' in last_data: new_data['cons_name'] = last_data['cons_name']
-            if 'cons_addr' in last_data: 
-                new_data['cons_addr'] = last_data['cons_addr']
-                new_data['cons_city'] = last_data['cons_city']
-                new_data['cons_state'] = last_data['cons_state']
-                new_data['cons_zip'] = last_data['cons_zip']
+            if 'cons_addr' in last_data: new_data['cons_addr'] = last_data['cons_addr']
+            if 'cons_city' in last_data: new_data['cons_city'] = last_data['cons_city']
+            if 'cons_state' in last_data: new_data['cons_state'] = last_data['cons_state']
+            if 'cons_zip' in last_data: new_data['cons_zip'] = last_data['cons_zip']
+            if 'cons_other' in last_data: new_data['cons_other'] = last_data['cons_other']
             
             if 'notes' in last_data and last_data['notes']: new_data['notes'] = last_data['notes']
             if 'carrier' in last_data: new_data['carrier'] = last_data['carrier']
@@ -353,7 +353,7 @@ class ProInvoice(FPDF):
     def footer(self):
         self.set_y(-15); self.set_font('Helvetica', 'I', 8); self.cell(0, 10, f'Page {self.page_no()} of {{nb}}', 0, 0, 'R')
 
-# --- PDF Generators (COMMERCIAL INVOICE UPDATED) ---
+# --- PDF Generators (UPDATED TO USE DESCRIPTION) ---
 def generate_ci_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes, total_val, sig_bytes=None, signer_name="Dean Turner"):
     pdf = ProInvoice(); pdf.alias_nb_pages(); pdf.add_page(); pdf.set_auto_page_break(auto=False)
     pdf.set_font('Helvetica', 'B', 20); pdf.cell(0, 10, doc_type, 0, 1, 'C'); pdf.ln(5)
@@ -364,10 +364,7 @@ def generate_ci_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_sh
     y_mid = max(pdf.get_y(), 60) + 10; pdf.set_xy(10, y_mid); pdf.set_font("Helvetica", 'B', 10); pdf.cell(80, 5, "IMPORTER OF RECORD:", 0, 1); pdf.set_x(10); pdf.set_font("Helvetica", '', 9); pdf.multi_cell(80, 4, addr_to)
     pdf.set_xy(100, y_mid); pdf.set_fill_color(245, 245, 245); pdf.rect(100, y_mid, 95, 30, 'F')
     pdf.set_xy(102, y_mid + 2); pdf.set_font("Helvetica", 'B', 9); pdf.cell(50, 5, "NOTES / BROKER / FDA:", 0, 1); pdf.set_xy(102, pdf.get_y()); pdf.set_font("Helvetica", '', 8); pdf.multi_cell(90, 4, notes); pdf.set_y(y_mid + 35)
-    
-    # Updated Table Columns: Added UNIT WT
     w = [10, 40, 20, 20, 12, 15, 20, 25]; headers = ["QTY", "DESCRIPTION", "HTS #", "FDA", "ORIGIN", "UNIT WT", "UNIT ($)", "TOTAL ($)"]
-    
     pdf.set_font("Helvetica", 'B', 7); pdf.set_fill_color(220, 220, 220)
     for i, h in enumerate(headers): pdf.cell(w[i], 8, h, 1, 0, 'C', fill=True)
     pdf.ln(); pdf.set_font("Helvetica", '', 7)
@@ -388,7 +385,8 @@ def generate_ci_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_sh
     line_h = 5
     for _, row in df.iterrows():
         origin = str(row.get('country_of_origin', 'CA'))
-        desc = str(row['Product Name'])
+        # CHANGED: Use Description instead of Product Name
+        desc = str(row['Description'])
         
         d_row = [
             (str(int(row['Quantity'])), 'C'), 
@@ -428,8 +426,6 @@ def generate_ci_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_sh
         os.unlink(tmp_path)
     return bytes(pdf.output())
 
-# ... (SI, PL, PO, BOL Generators similar updates, focusing on CSV logic primarily) ...
-
 def generate_si_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes, total_val, sig_bytes, signer_name):
     pdf = ProInvoice(); pdf.alias_nb_pages(); pdf.add_page(); pdf.set_auto_page_break(auto=False)
     pdf.set_font('Helvetica', 'B', 20); pdf.cell(0, 10, "SALES INVOICE", 0, 1, 'C'); pdf.ln(5)
@@ -456,7 +452,8 @@ def generate_si_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes,
         return lines
     line_h = 5
     for _, row in df.iterrows():
-        d_row = [(str(int(row['Quantity'])), 'C'), (str(row['Product Name']), 'L'), (f"{row['Transfer Price (Unit)']:.2f}", 'R'), (f"{row['Transfer Total']:.2f}", 'R')]
+        # CHANGED: Use Description
+        d_row = [(str(int(row['Quantity'])), 'C'), (str(row['Description']), 'L'), (f"{row['Transfer Price (Unit)']:.2f}", 'R'), (f"{row['Transfer Total']:.2f}", 'R')]
         max_lines = 1
         for i, (txt, align) in enumerate(d_row):
             lines = get_lines(txt, w[i] - 2)
@@ -488,6 +485,7 @@ def generate_pl_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, carton
     pdf.set_font("Helvetica", 'B', 7); pdf.set_fill_color(220, 220, 220)
     for i, h in enumerate(headers): pdf.cell(w[i], 8, h, 1, 0, 'C', fill=True)
     pdf.ln(); pdf.set_font("Helvetica", '', 7)
+    
     def get_lines(text, width):
         if not text: return 1
         lines = 0; 
@@ -500,18 +498,22 @@ def generate_pl_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, carton
                 else: curr_w += word_w
             lines += lines_para
         return lines
+
     line_h = 5
     for _, row in df.iterrows():
-        d_row = [(str(int(row['Quantity'])), 'C'), (str(row['Product Name']), 'L')]
+        # CHANGED: Use Description
+        d_row = [(str(int(row['Quantity'])), 'C'), (str(row['Description']), 'L')]
         max_lines = 1
         for i, (txt, align) in enumerate(d_row):
             lines = get_lines(txt, w[i] - 2)
             if lines > max_lines: max_lines = lines
         row_h = max_lines * line_h
+        
         if pdf.get_y() + row_h > 270:
             pdf.add_page(); pdf.set_font("Helvetica", 'B', 7); pdf.set_fill_color(220, 220, 220)
             for i, h in enumerate(headers): pdf.cell(w[i], 8, h, 1, 0, 'C', fill=True)
             pdf.ln(); pdf.set_font("Helvetica", '', 7)
+            
         y_curr = pdf.get_y(); x_curr = 10
         for i, (txt, align) in enumerate(d_row):
             pdf.set_xy(x_curr + sum(w[:i]), y_curr)
@@ -519,6 +521,7 @@ def generate_pl_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, carton
         pdf.set_xy(10, y_curr)
         for i in range(len(w)): pdf.rect(10 + sum(w[:i]), y_curr, w[i], row_h)
         pdf.set_y(y_curr + row_h)
+
     pdf.ln(5); pdf.set_font("Helvetica", 'B', 10); pdf.set_x(10); pdf.cell(sum(w), 8, f"TOTAL CARTONS: {cartons}", 0, 1, 'R')
     return bytes(pdf.output())
 
@@ -548,7 +551,8 @@ def generate_po_pdf(df, inv_num, inv_date, addr_buyer, addr_vendor, addr_ship, t
         return lines
     line_h = 5
     for _, row in df.iterrows():
-        d_row = [(str(int(row['Quantity'])), 'C'), (str(row['Product Name']), 'L'), (f"{row['Transfer Price (Unit)']:.2f}", 'R'), (f"{row['Transfer Total']:.2f}", 'R')]
+        # CHANGED: Use Description
+        d_row = [(str(int(row['Quantity'])), 'C'), (str(row['Description']), 'L'), (f"{row['Transfer Price (Unit)']:.2f}", 'R'), (f"{row['Transfer Total']:.2f}", 'R')]
         max_lines = 1
         for i, (txt, align) in enumerate(d_row):
             lines = get_lines(txt, w[i] - 2)
@@ -643,7 +647,9 @@ def generate_customscity_csv(df, inv_number, inv_date, c_name, c_addr, c_city, c
             'Shipper City': 'MONTREAL', 'Shipper Country': 'CA', 'Consignee Name': c_name,
             'Consignee Address': c_addr.replace('\n', ', '),
             'Consignee City': c_city, 'Consignee State or Province': c_state, 'Consignee Postal Code': c_zip, 'Consignee Country': 'US',
-            'Description': row['Description'], 'Product ID': row.get('product_id', 'VARIOUS'), 'Carrier Name': carrier_code, 'Vessel Name': '',
+            # CHANGED: Use Description (though CSV logic already had it, confirming it pulls correctly)
+            'Description': row['Description'], 
+            'Product ID': row.get('product_id', 'VARIOUS'), 'Carrier Name': carrier_code, 'Vessel Name': '',
             'Voyage Trip Flight Number': hbol_number, 'Rail Car Number': ''
         })
     return pd.DataFrame(rows).to_csv(index=False).encode('utf-8')
@@ -717,7 +723,9 @@ if page == "Batches (Dashboard)":
                 with c3a: c_city = st.text_input("City", value=batch_data.get('cons_city', DEF_CONS_CITY))
                 with c3b: c_state = st.text_input("State", value=batch_data.get('cons_state', DEF_CONS_STATE))
                 with c3c: c_zip = st.text_input("Zip Code", value=batch_data.get('cons_zip', DEF_CONS_ZIP))
-                full_consignee_txt = f"{c_name}\n{c_addr}\n{c_city}, {c_state} {c_zip}\nUnited States"
+                c_other = st.text_input("Other Info (e.g. IRS #)", value=batch_data.get('cons_other', DEF_CONS_OTHER))
+                lines = [c_name, c_addr, f"{c_city}, {c_state} {c_zip}", c_other, "United States"]
+                full_consignee_txt = "\n".join([L for L in lines if L and L.strip()])
                 b_notes = st.text_area("Notes", value=batch_data.get('notes', ""), height=100)
 
             st.subheader("📦 Orders")
@@ -757,9 +765,7 @@ if page == "Batches (Dashboard)":
                             merged['unit_price'] = pd.to_numeric(merged['unit_price'], errors='coerce').fillna(0.0)
                             merged['Transfer Price (Unit)'] = merged.apply(lambda x: x['unit_price'] if x['unit_price'] > 0 else x['CSV_Price'], axis=1)
                             if 'country_of_origin' not in merged.columns: merged['country_of_origin'] = "CA"
-                            # Pull Product ID
                             if 'product_id' not in merged.columns: merged['product_id'] = merged['Variant code / SKU']
-                            
                             df = merged 
                         else:
                             sales_data['Product Name'] = sales_data['Item variant']
@@ -781,12 +787,10 @@ if page == "Batches (Dashboard)":
         if not df.empty:
             df['Transfer Total'] = df['Quantity'] * df['Transfer Price (Unit)']
             
-            # --- CONSOLIDATION LOGIC START ---
             df['FDA Code'] = df['FDA Code'].fillna("N/A")
             df['country_of_origin'] = df['country_of_origin'].fillna("N/A")
             df['product_id'] = df['product_id'].fillna("N/A")
 
-            # Updated GroupBy to include product_id
             consolidated = df.groupby(['product_id', 'HTS Code', 'Weight (lbs)', 'country_of_origin', 'FDA Code']).agg({
                 'Quantity': 'sum',
                 'Transfer Total': 'sum',
@@ -796,7 +800,6 @@ if page == "Batches (Dashboard)":
             }).reset_index()
             
             consolidated['Transfer Price (Unit)'] = consolidated['Transfer Total'] / consolidated['Quantity']
-            # --- CONSOLIDATION LOGIC END ---
             
             edited_df = st.data_editor(consolidated, num_rows="dynamic", use_container_width=True,
                 column_config={"Transfer Price (Unit)": st.column_config.NumberColumn("Unit Price ($)", format="$%.2f"),
@@ -818,7 +821,7 @@ if page == "Batches (Dashboard)":
             if st.button("💾 SAVE BATCH PROGRESS", type="primary"):
                 save_data = {
                     "inv_number": b_inv_num, "inv_date": str(b_date), 
-                    "cons_name": c_name, "cons_addr": c_addr, "cons_city": c_city, "cons_state": c_state, "cons_zip": c_zip,
+                    "cons_name": c_name, "cons_addr": c_addr, "cons_city": c_city, "cons_state": c_state, "cons_zip": c_zip, "cons_other": c_other,
                     "notes": b_notes, "carrier": sel_carrier,
                     "pallets": pallets, "cartons": cartons, "gross_weight": gross_weight,
                     "orders_json": edited_df.to_json(orient='split')
@@ -834,8 +837,6 @@ if page == "Batches (Dashboard)":
             pdf_si = generate_si_pdf(edited_df, f"SI-HRUS{base_id}", b_date, DEFAULT_SHIPPER, DEFAULT_IMPORTER, full_consignee_txt, b_notes, total_val, get_signature(), "Dean Turner")
             pdf_pl = generate_pl_pdf(edited_df, f"PL-HRUS{base_id}", b_date, DEFAULT_SHIPPER, DEFAULT_IMPORTER, full_consignee_txt, cartons)
             pdf_bol = generate_bol_pdf(edited_df, b_inv_num, b_date, DEFAULT_SHIPPER, full_consignee_txt, carrier_name, hbol, pallets, cartons, gross_weight, get_signature())
-            
-            # Pass c_name to CSV generator
             csv_data = generate_customscity_csv(edited_df, b_inv_num, b_date, c_name, c_addr, c_city, c_state, c_zip, hbol, carrier_code)
             
             c1, c2, c3, c4, c5 = st.columns(5)
@@ -849,7 +850,7 @@ if page == "Batches (Dashboard)":
             with c_csv_btn: st.download_button("📥 CustomsCity CSV", csv_data, f"CustomsCity_{base_id}.csv", type="primary", key=f"dl_csv_{batch_id}")
             with c_csv_link: st.markdown("""<div style="margin-top: 8px;"><a href="https://app.customscity.com/upload/document/" target="_blank" style="font-weight: 600; color: #6F4E37; text-decoration: none;">🚀 Upload to CustomsCity</a></div>""", unsafe_allow_html=True)
             
-            # EMAIL CENTER (Omitted for brevity, same as previous)
+            # EMAIL CENTER
             st.markdown("---")
             st.subheader("📧 Email Center")
             with st.expander("⚙️ Sender Settings", expanded=True):
