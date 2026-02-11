@@ -388,7 +388,7 @@ def generate_ci_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_sh
     line_h = 5
     for _, row in df.iterrows():
         origin = str(row.get('country_of_origin', 'CA'))
-        desc = str(row['Product Name'])
+        desc = str(row['Description']) # Changed from Product Name to Description
         
         d_row = [
             (str(int(row['Quantity'])), 'C'), 
@@ -441,8 +441,6 @@ def generate_ci_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_sh
         os.unlink(tmp_path)
     return bytes(pdf.output())
 
-# ... (SI, PL, PO, BOL Generators same as before) ...
-
 def generate_si_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes, total_val, sig_bytes, signer_name):
     pdf = ProInvoice(); pdf.alias_nb_pages(); pdf.add_page(); pdf.set_auto_page_break(auto=False)
     pdf.set_font('Helvetica', 'B', 20); pdf.cell(0, 10, "SALES INVOICE", 0, 1, 'C'); pdf.ln(5)
@@ -471,7 +469,7 @@ def generate_si_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes,
 
     line_h = 5
     for _, row in df.iterrows():
-        d_row = [(str(int(row['Quantity'])), 'C'), (str(row['Product Name']), 'L'), (f"{row['Transfer Price (Unit)']:.2f}", 'R'), (f"{row['Transfer Total']:.2f}", 'R')]
+        d_row = [(str(int(row['Quantity'])), 'C'), (str(row['Description']), 'L'), (f"{row['Transfer Price (Unit)']:.2f}", 'R'), (f"{row['Transfer Total']:.2f}", 'R')]
         max_lines = 1
         for i, (txt, align) in enumerate(d_row):
             lines = get_lines(txt, w[i] - 2)
@@ -519,7 +517,7 @@ def generate_pl_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, carton
 
     line_h = 5
     for _, row in df.iterrows():
-        d_row = [(str(int(row['Quantity'])), 'C'), (str(row['Product Name']), 'L')]
+        d_row = [(str(int(row['Quantity'])), 'C'), (str(row['Description']), 'L')]
         max_lines = 1
         for i, (txt, align) in enumerate(d_row):
             lines = get_lines(txt, w[i] - 2)
@@ -570,7 +568,7 @@ def generate_po_pdf(df, inv_num, inv_date, addr_buyer, addr_vendor, addr_ship, t
 
     line_h = 5
     for _, row in df.iterrows():
-        d_row = [(str(int(row['Quantity'])), 'C'), (str(row['Product Name']), 'L'), (f"{row['Transfer Price (Unit)']:.2f}", 'R'), (f"{row['Transfer Total']:.2f}", 'R')]
+        d_row = [(str(int(row['Quantity'])), 'C'), (str(row['Description']), 'L'), (f"{row['Transfer Price (Unit)']:.2f}", 'R'), (f"{row['Transfer Total']:.2f}", 'R')]
         max_lines = 1
         for i, (txt, align) in enumerate(d_row):
             lines = get_lines(txt, w[i] - 2)
@@ -857,6 +855,7 @@ if page == "Batches (Dashboard)":
             pdf_si = generate_si_pdf(edited_df, f"SI-HRUS{base_id}", b_date, DEFAULT_SHIPPER, DEFAULT_IMPORTER, full_consignee_txt, b_notes, total_val, get_signature(), "Dean Turner")
             pdf_pl = generate_pl_pdf(edited_df, f"PL-HRUS{base_id}", b_date, DEFAULT_SHIPPER, DEFAULT_IMPORTER, full_consignee_txt, cartons)
             pdf_bol = generate_bol_pdf(edited_df, b_inv_num, b_date, DEFAULT_SHIPPER, full_consignee_txt, carrier_name, hbol, pallets, cartons, gross_weight, get_signature())
+            
             csv_data = generate_customscity_csv(edited_df, b_inv_num, b_date, c_name, c_addr, c_city, c_state, c_zip, hbol, carrier_code)
             
             c1, c2, c3, c4, c5 = st.columns(5)
@@ -870,7 +869,7 @@ if page == "Batches (Dashboard)":
             with c_csv_btn: st.download_button("📥 CustomsCity CSV", csv_data, f"CustomsCity_{base_id}.csv", type="primary", key=f"dl_csv_{batch_id}")
             with c_csv_link: st.markdown("""<div style="margin-top: 8px;"><a href="https://app.customscity.com/upload/document/" target="_blank" style="font-weight: 600; color: #6F4E37; text-decoration: none;">🚀 Upload to CustomsCity</a></div>""", unsafe_allow_html=True)
             
-            # EMAIL CENTER (Omitted for brevity, same as previous)
+            # EMAIL CENTER
             st.markdown("---")
             st.subheader("📧 Email Center")
             with st.expander("⚙️ Sender Settings", expanded=True):
