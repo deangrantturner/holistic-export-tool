@@ -17,20 +17,21 @@ import random
 import json
 import time
 
-# --- GLOBAL DEFAULTS ---
+# --- GLOBAL DEFAULTS (UPDATED) ---
 DEFAULT_SHIPPER = """Holistic Roasters inc.
 3780 St-Patrick
 Montreal, QC, Canada H4E 1A2
 BN/GST: 780810917RC0001
 TVQ: 1225279701TQ0001"""
 
-DEF_CONS_NAME = "Holistic Roasters Client"
-DEF_CONS_ADDR = "c/o FedEx Ship Center\n1049 US-11"
+# UPDATED CONSIGNEE DEFAULTS
+DEF_CONS_NAME = "Border Mail Depot"
+DEF_CONS_ADDR = "102 W. Service Road"
 DEF_CONS_CITY = "Champlain"
 DEF_CONS_STATE = "NY"
 DEF_CONS_ZIP = "12919"
-DEF_CONS_OTHER = "IRS# 00-0000000"
-DEFAULT_CONSIGNEE_FULL = "Holistic Roasters Client\nc/o FedEx Ship Center\n1049 US-11\nChamplain, NY 12919\nIRS# 00-0000000\nUnited States"
+DEF_CONS_OTHER = "IRS# 461729644"
+DEFAULT_CONSIGNEE_FULL = "Border Mail Depot\n102 W. Service Road\nChamplain, NY 12919\nIRS# 461729644\nUnited States"
 
 DEFAULT_IMPORTER = """Holistic Roasters USA
 30 N Gould St, STE R
@@ -195,8 +196,7 @@ def create_batch(name):
     est = pytz.timezone('US/Eastern')
     now = datetime.now(est).strftime("%Y-%m-%d %H:%M:%S")
     
-    saved_cons = get_setting('default_consignee')
-    def_cons = saved_cons.decode('utf-8') if saved_cons else DEFAULT_CONSIGNEE_FULL
+    # Defaults (Now using the updated CONSTANTS at the top)
     saved_notes = get_setting('default_notes')
     def_notes = saved_notes.decode('utf-8') if saved_notes else DEFAULT_NOTES
     saved_carrier = get_setting('default_carrier')
@@ -285,7 +285,14 @@ def show_backup_prompt(key_suffix):
     if os.path.exists("invoices.db"):
         st.info("✅ **Changes Saved to Database!**")
         with open("invoices.db", "rb") as f:
-            st.download_button("📥 DOWNLOAD BACKUP NOW", data=f, file_name=f"holistic_backup_{datetime.now().strftime('%Y-%m-%d_%H%M')}.db", mime="application/x-sqlite3", key=f"prompt_backup_{key_suffix}", type="primary")
+            st.download_button(
+                "📥 DOWNLOAD BACKUP NOW",
+                data=f,
+                file_name=f"holistic_backup_{datetime.now().strftime('%Y-%m-%d_%H%M')}.db",
+                mime="application/x-sqlite3",
+                key=f"prompt_backup_{key_suffix}",
+                type="primary"
+            )
 
 def send_email_with_attachments(sender_email, sender_password, recipient_email, subject, body, files):
     msg = MIMEMultipart()
@@ -388,7 +395,7 @@ def generate_ci_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_sh
     line_h = 5
     for _, row in df.iterrows():
         origin = str(row.get('country_of_origin', 'CA'))
-        desc = str(row['Description']) # Changed from Product Name to Description
+        desc = str(row['Description'])
         
         d_row = [
             (str(int(row['Quantity'])), 'C'), 
@@ -440,6 +447,8 @@ def generate_ci_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_sh
         except: pass
         os.unlink(tmp_path)
     return bytes(pdf.output())
+
+# ... (SI, PL, PO, BOL Generators same as before) ...
 
 def generate_si_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes, total_val, sig_bytes, signer_name):
     pdf = ProInvoice(); pdf.alias_nb_pages(); pdf.add_page(); pdf.set_auto_page_break(auto=False)
@@ -869,7 +878,7 @@ if page == "Batches (Dashboard)":
             with c_csv_btn: st.download_button("📥 CustomsCity CSV", csv_data, f"CustomsCity_{base_id}.csv", type="primary", key=f"dl_csv_{batch_id}")
             with c_csv_link: st.markdown("""<div style="margin-top: 8px;"><a href="https://app.customscity.com/upload/document/" target="_blank" style="font-weight: 600; color: #6F4E37; text-decoration: none;">🚀 Upload to CustomsCity</a></div>""", unsafe_allow_html=True)
             
-            # EMAIL CENTER
+            # EMAIL CENTER (Omitted for brevity, same as previous)
             st.markdown("---")
             st.subheader("📧 Email Center")
             with st.expander("⚙️ Sender Settings", expanded=True):
