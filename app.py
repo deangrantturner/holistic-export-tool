@@ -24,9 +24,13 @@ Montreal, QC, Canada H4E 1A2
 BN/GST: 780810917RC0001
 TVQ: 1225279701TQ0001"""
 
-DEFAULT_CONSIGNEE = """c/o FedEx Ship Center
-1049 US-11
-Champlain, NY 12919, United States"""
+# --- RESTORED DEFINITIONS (These were missing) ---
+DEF_CONS_ADDR = "c/o FedEx Ship Center\n1049 US-11"
+DEF_CONS_CITY = "Champlain"
+DEF_CONS_STATE = "NY"
+DEF_CONS_ZIP = "12919"
+DEFAULT_CONSIGNEE = "c/o FedEx Ship Center\n1049 US-11\nChamplain, NY 12919, United States" 
+# -------------------------------------------------
 
 DEFAULT_IMPORTER = """Holistic Roasters USA
 30 N Gould St, STE R
@@ -504,6 +508,7 @@ def generate_po_pdf(df, inv_num, inv_date, addr_buyer, addr_vendor, addr_ship, t
     pdf.set_xy(90, y_start); pdf.set_font("Helvetica", 'B', 10); pdf.cell(70, 5, "SHIP TO:", 0, 1); pdf.set_xy(90, pdf.get_y()); pdf.set_font("Helvetica", '', 9); pdf.multi_cell(70, 4, addr_ship)
     pdf.set_xy(160, y_start); pdf.set_font("Helvetica", 'B', 12); pdf.cell(40, 6, f"Invoice #: {inv_num}", 0, 1, 'R'); pdf.set_x(160); pdf.set_font("Helvetica", '', 10); pdf.cell(40, 6, f"Date: {inv_date}", 0, 1, 'R'); pdf.set_x(160); pdf.cell(40, 6, "Currency: USD", 0, 1, 'R')
     y_mid = max(pdf.get_y(), 50) + 10; pdf.set_xy(10, y_mid); pdf.set_font("Helvetica", 'B', 10); pdf.cell(80, 5, "TO (VENDOR):", 0, 1); pdf.set_x(10); pdf.set_font("Helvetica", '', 9); pdf.multi_cell(80, 4, addr_vendor); pdf.set_y(y_mid + 35)
+    
     w = [20, 100, 35, 35]; headers = ["QTY", "PRODUCT", "UNIT ($)", "TOTAL ($)"]
     pdf.set_font("Helvetica", 'B', 7); pdf.set_fill_color(220, 220, 220)
     for i, h in enumerate(headers): pdf.cell(w[i], 8, h, 1, 0, 'C', fill=True)
@@ -625,7 +630,7 @@ def generate_customscity_csv(df, inv_number, inv_date, c_addr, c_city, c_state, 
             'Shipper City': 'MONTREAL', 'Shipper Country': 'CA', 'Consignee Name': c_name,
             'Consignee Address': c_addr.replace('\n', ', '),
             'Consignee City': c_city, 'Consignee State or Province': c_state, 'Consignee Postal Code': c_zip, 'Consignee Country': 'US',
-            'Description': row['Description'], 'Product ID': row.get('Variant code / SKU', 'VARIOUS'), 'Carrier Name': carrier_code, 'Vessel Name': '',
+            'Description': row['Description'], 'Product ID': row['Variant code / SKU'], 'Carrier Name': carrier_code, 'Vessel Name': '',
             'Voyage Trip Flight Number': hbol_number, 'Rail Car Number': ''
         })
     return pd.DataFrame(rows).to_csv(index=False).encode('utf-8')
@@ -757,23 +762,11 @@ if page == "Batches (Dashboard)":
         st.markdown("---")
         if not df.empty:
             df['Transfer Total'] = df['Quantity'] * df['Transfer Price (Unit)']
-            
-            # --- CONSOLIDATION LOGIC START ---
-            # Group items by HTS, Weight, Origin, FDA (Logic for Customs)
-            # We aggregate Qty and Total $
-            # We take the FIRST Product Name and Description as the representative for the group
-            consolidated = df.groupby(['HTS Code', 'Weight (lbs)', 'country_of_origin', 'FDA Code']).agg({
-                'Quantity': 'sum',
-                'Transfer Total': 'sum',
-                'Product Name': 'first',
-                'Description': 'first',
-                # Keep SKU list if needed, or just say 'VARIOUS'
-                'Variant code / SKU': lambda x: ', '.join(x.unique()) if len(x.unique()) < 3 else 'VARIOUS'
+            consolidated = df.groupby(['Variant code / SKU', 'Product Name', 'Description']).agg({
+                'Quantity': 'sum', 'HTS Code': 'first', 'FDA Code': 'first', 
+                'Weight (lbs)': 'first', 'country_of_origin': 'first',
+                'Transfer Price (Unit)': 'mean', 'Transfer Total': 'sum'
             }).reset_index()
-            
-            # Recalculate Unit Price (Weighted Average) to ensure Total matches
-            consolidated['Transfer Price (Unit)'] = consolidated['Transfer Total'] / consolidated['Quantity']
-            # --- CONSOLIDATION LOGIC END ---
             
             edited_df = st.data_editor(consolidated, num_rows="dynamic", use_container_width=True,
                 column_config={"Transfer Price (Unit)": st.column_config.NumberColumn("Unit Price ($)", format="$%.2f"),
@@ -824,7 +817,7 @@ if page == "Batches (Dashboard)":
             with c_csv_btn: st.download_button("📥 CustomsCity CSV", csv_data, f"CustomsCity_{base_id}.csv", type="primary", key=f"dl_csv_{batch_id}")
             with c_csv_link: st.markdown("""<div style="margin-top: 8px;"><a href="https://app.customscity.com/upload/document/" target="_blank" style="font-weight: 600; color: #6F4E37; text-decoration: none;">🚀 Upload to CustomsCity</a></div>""", unsafe_allow_html=True)
             
-            # EMAIL CENTER (Omitted for brevity, same as previous)
+            # EMAIL CENTER
             st.markdown("---")
             st.subheader("📧 Email Center")
             with st.expander("⚙️ Sender Settings", expanded=True):
