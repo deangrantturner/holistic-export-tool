@@ -24,13 +24,11 @@ Montreal, QC, Canada H4E 1A2
 BN/GST: 780810917RC0001
 TVQ: 1225279701TQ0001"""
 
-# --- RESTORED DEFINITIONS (These were missing) ---
 DEF_CONS_ADDR = "c/o FedEx Ship Center\n1049 US-11"
 DEF_CONS_CITY = "Champlain"
 DEF_CONS_STATE = "NY"
 DEF_CONS_ZIP = "12919"
-DEFAULT_CONSIGNEE = "c/o FedEx Ship Center\n1049 US-11\nChamplain, NY 12919, United States" 
-# -------------------------------------------------
+DEFAULT_CONSIGNEE = "c/o FedEx Ship Center\n1049 US-11\nChamplain, NY 12919, United States"
 
 DEFAULT_IMPORTER = """Holistic Roasters USA
 30 N Gould St, STE R
@@ -66,7 +64,6 @@ def init_db():
                   unit_price REAL,
                   country_of_origin TEXT)''')
     
-    # MIGRATIONS
     try: c.execute("ALTER TABLE product_catalog_v3 ADD COLUMN unit_price REAL")
     except: pass 
     try: c.execute("ALTER TABLE product_catalog_v3 ADD COLUMN country_of_origin TEXT")
@@ -339,7 +336,7 @@ class ProInvoice(FPDF):
     def footer(self):
         self.set_y(-15); self.set_font('Helvetica', 'I', 8); self.cell(0, 10, f'Page {self.page_no()} of {{nb}}', 0, 0, 'R')
 
-# --- PDF Generators ---
+# --- PDF Generators (COMMERCIAL INVOICE UPDATED) ---
 def generate_ci_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes, total_val, sig_bytes=None, signer_name="Dean Turner"):
     pdf = ProInvoice(); pdf.alias_nb_pages(); pdf.add_page(); pdf.set_auto_page_break(auto=False)
     pdf.set_font('Helvetica', 'B', 20); pdf.cell(0, 10, doc_type, 0, 1, 'C'); pdf.ln(5)
@@ -350,7 +347,12 @@ def generate_ci_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_sh
     y_mid = max(pdf.get_y(), 60) + 10; pdf.set_xy(10, y_mid); pdf.set_font("Helvetica", 'B', 10); pdf.cell(80, 5, "IMPORTER OF RECORD:", 0, 1); pdf.set_x(10); pdf.set_font("Helvetica", '', 9); pdf.multi_cell(80, 4, addr_to)
     pdf.set_xy(100, y_mid); pdf.set_fill_color(245, 245, 245); pdf.rect(100, y_mid, 95, 30, 'F')
     pdf.set_xy(102, y_mid + 2); pdf.set_font("Helvetica", 'B', 9); pdf.cell(50, 5, "NOTES / BROKER / FDA:", 0, 1); pdf.set_xy(102, pdf.get_y()); pdf.set_font("Helvetica", '', 8); pdf.multi_cell(90, 4, notes); pdf.set_y(y_mid + 35)
-    w = [10, 35, 42, 22, 20, 16, 20, 25]; headers = ["QTY", "PRODUCT", "DESCRIPTION", "HTS #", "FDA", "ORIGIN", "UNIT ($)", "TOTAL ($)"]
+    
+    # Updated Table Columns: Added UNIT WT
+    w = [10, 40, 20, 20, 12, 15, 20, 25]; headers = ["QTY", "DESCRIPTION", "HTS #", "FDA", "ORIGIN", "UNIT WT", "UNIT ($)", "TOTAL ($)"]
+    # Adjust description width if needed
+    # Total width check: 10+40+20+20+12+15+20+25 = 162 (Safe)
+    
     pdf.set_font("Helvetica", 'B', 7); pdf.set_fill_color(220, 220, 220)
     for i, h in enumerate(headers): pdf.cell(w[i], 8, h, 1, 0, 'C', fill=True)
     pdf.ln(); pdf.set_font("Helvetica", '', 7)
@@ -371,16 +373,30 @@ def generate_ci_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_sh
     line_h = 5
     for _, row in df.iterrows():
         origin = str(row.get('country_of_origin', 'CA'))
-        d_row = [(str(int(row['Quantity'])), 'C'), (str(row['Product Name']), 'L'), (str(row['Description']), 'L'), (str(row.get('HTS Code','')), 'C'), (str(row.get('FDA Code','')), 'C'), (origin, 'C'), (f"{row['Transfer Price (Unit)']:.2f}", 'R'), (f"{row['Transfer Total']:.2f}", 'R')]
+        desc = str(row['Product Name']) # Use consolidated name/desc
+        
+        d_row = [
+            (str(int(row['Quantity'])), 'C'), 
+            (desc, 'L'), 
+            (str(row.get('HTS Code','')), 'C'), 
+            (str(row.get('FDA Code','')), 'C'), 
+            (origin, 'C'), 
+            (f"{row.get('Weight (lbs)', 0):.2f} lbs", 'C'), # New Unit Weight Column
+            (f"{row['Transfer Price (Unit)']:.2f}", 'R'), 
+            (f"{row['Transfer Total']:.2f}", 'R')
+        ]
+        
         max_lines = 1
         for i, (txt, align) in enumerate(d_row):
             lines = get_lines(txt, w[i] - 2); 
             if lines > max_lines: max_lines = lines
         row_h = max_lines * line_h
+        
         if pdf.get_y() + row_h > 270:
             pdf.add_page(); pdf.set_font("Helvetica", 'B', 7); pdf.set_fill_color(220, 220, 220)
             for i, h in enumerate(headers): pdf.cell(w[i], 8, h, 1, 0, 'C', fill=True)
             pdf.ln(); pdf.set_font("Helvetica", '', 7)
+        
         y_curr = pdf.get_y(); x_curr = 10
         for i, (txt, align) in enumerate(d_row):
             pdf.set_xy(x_curr + sum(w[:i]), y_curr); pdf.multi_cell(w[i], line_h, txt, 0, align)
@@ -397,6 +413,8 @@ def generate_ci_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_sh
         os.unlink(tmp_path)
     return bytes(pdf.output())
 
+# ... (SI, PL, PO, BOL Generators remain largely the same, included below for completeness) ...
+
 def generate_si_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes, total_val, sig_bytes, signer_name):
     pdf = ProInvoice(); pdf.alias_nb_pages(); pdf.add_page(); pdf.set_auto_page_break(auto=False)
     pdf.set_font('Helvetica', 'B', 20); pdf.cell(0, 10, "SALES INVOICE", 0, 1, 'C'); pdf.ln(5)
@@ -405,7 +423,6 @@ def generate_si_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes,
     pdf.set_xy(90, y_start); pdf.set_font("Helvetica", 'B', 10); pdf.cell(70, 5, "SHIP TO:", 0, 1); pdf.set_xy(90, pdf.get_y()); pdf.set_font("Helvetica", '', 9); pdf.multi_cell(70, 4, addr_ship)
     pdf.set_xy(160, y_start); pdf.set_font("Helvetica", 'B', 12); pdf.cell(40, 6, f"Invoice #: {inv_num}", 0, 1, 'R'); pdf.set_x(160); pdf.set_font("Helvetica", '', 10); pdf.cell(40, 6, f"Date: {inv_date}", 0, 1, 'R'); pdf.set_x(160); pdf.cell(40, 6, "Currency: USD", 0, 1, 'R')
     y_mid = max(pdf.get_y(), 50) + 10; pdf.set_xy(10, y_mid); pdf.set_font("Helvetica", 'B', 10); pdf.cell(80, 5, "BILL TO:", 0, 1); pdf.set_x(10); pdf.set_font("Helvetica", '', 9); pdf.multi_cell(80, 4, addr_to); pdf.set_y(y_mid + 35)
-    
     w = [20, 100, 35, 35]; headers = ["QTY", "PRODUCT", "UNIT ($)", "TOTAL ($)"]
     pdf.set_font("Helvetica", 'B', 7); pdf.set_fill_color(220, 220, 220); 
     for i, h in enumerate(headers): pdf.cell(w[i], 8, h, 1, 0, 'C', fill=True)
@@ -432,16 +449,13 @@ def generate_si_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes,
             lines = get_lines(txt, w[i] - 2)
             if lines > max_lines: max_lines = lines
         row_h = max_lines * line_h
-        
         if pdf.get_y() + row_h > 270:
             pdf.add_page(); pdf.set_font("Helvetica", 'B', 7); pdf.set_fill_color(220, 220, 220)
             for i, h in enumerate(headers): pdf.cell(w[i], 8, h, 1, 0, 'C', fill=True)
             pdf.ln(); pdf.set_font("Helvetica", '', 7)
-            
         y_curr = pdf.get_y(); x_curr = 10
         for i, (txt, align) in enumerate(d_row):
-            pdf.set_xy(x_curr + sum(w[:i]), y_curr)
-            pdf.multi_cell(w[i], line_h, txt, 0, align)
+            pdf.set_xy(x_curr + sum(w[:i]), y_curr); pdf.multi_cell(w[i], line_h, txt, 0, align)
         pdf.set_xy(10, y_curr)
         for i in range(len(w)): pdf.rect(10 + sum(w[:i]), y_curr, w[i], row_h)
         pdf.set_y(y_curr + row_h)
@@ -483,16 +497,13 @@ def generate_pl_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, carton
             lines = get_lines(txt, w[i] - 2)
             if lines > max_lines: max_lines = lines
         row_h = max_lines * line_h
-        
         if pdf.get_y() + row_h > 270:
             pdf.add_page(); pdf.set_font("Helvetica", 'B', 7); pdf.set_fill_color(220, 220, 220)
             for i, h in enumerate(headers): pdf.cell(w[i], 8, h, 1, 0, 'C', fill=True)
             pdf.ln(); pdf.set_font("Helvetica", '', 7)
-            
         y_curr = pdf.get_y(); x_curr = 10
         for i, (txt, align) in enumerate(d_row):
-            pdf.set_xy(x_curr + sum(w[:i]), y_curr)
-            pdf.multi_cell(w[i], line_h, txt, 0, align)
+            pdf.set_xy(x_curr + sum(w[:i]), y_curr); pdf.multi_cell(w[i], line_h, txt, 0, align)
         pdf.set_xy(10, y_curr)
         for i in range(len(w)): pdf.rect(10 + sum(w[:i]), y_curr, w[i], row_h)
         pdf.set_y(y_curr + row_h)
@@ -508,7 +519,6 @@ def generate_po_pdf(df, inv_num, inv_date, addr_buyer, addr_vendor, addr_ship, t
     pdf.set_xy(90, y_start); pdf.set_font("Helvetica", 'B', 10); pdf.cell(70, 5, "SHIP TO:", 0, 1); pdf.set_xy(90, pdf.get_y()); pdf.set_font("Helvetica", '', 9); pdf.multi_cell(70, 4, addr_ship)
     pdf.set_xy(160, y_start); pdf.set_font("Helvetica", 'B', 12); pdf.cell(40, 6, f"Invoice #: {inv_num}", 0, 1, 'R'); pdf.set_x(160); pdf.set_font("Helvetica", '', 10); pdf.cell(40, 6, f"Date: {inv_date}", 0, 1, 'R'); pdf.set_x(160); pdf.cell(40, 6, "Currency: USD", 0, 1, 'R')
     y_mid = max(pdf.get_y(), 50) + 10; pdf.set_xy(10, y_mid); pdf.set_font("Helvetica", 'B', 10); pdf.cell(80, 5, "TO (VENDOR):", 0, 1); pdf.set_x(10); pdf.set_font("Helvetica", '', 9); pdf.multi_cell(80, 4, addr_vendor); pdf.set_y(y_mid + 35)
-    
     w = [20, 100, 35, 35]; headers = ["QTY", "PRODUCT", "UNIT ($)", "TOTAL ($)"]
     pdf.set_font("Helvetica", 'B', 7); pdf.set_fill_color(220, 220, 220)
     for i, h in enumerate(headers): pdf.cell(w[i], 8, h, 1, 0, 'C', fill=True)
@@ -535,16 +545,13 @@ def generate_po_pdf(df, inv_num, inv_date, addr_buyer, addr_vendor, addr_ship, t
             lines = get_lines(txt, w[i] - 2)
             if lines > max_lines: max_lines = lines
         row_h = max_lines * line_h
-        
         if pdf.get_y() + row_h > 270:
             pdf.add_page(); pdf.set_font("Helvetica", 'B', 7); pdf.set_fill_color(220, 220, 220)
             for i, h in enumerate(headers): pdf.cell(w[i], 8, h, 1, 0, 'C', fill=True)
             pdf.ln(); pdf.set_font("Helvetica", '', 7)
-            
         y_curr = pdf.get_y(); x_curr = 10
         for i, (txt, align) in enumerate(d_row):
-            pdf.set_xy(x_curr + sum(w[:i]), y_curr)
-            pdf.multi_cell(w[i], line_h, txt, 0, align)
+            pdf.set_xy(x_curr + sum(w[:i]), y_curr); pdf.multi_cell(w[i], line_h, txt, 0, align)
         pdf.set_xy(10, y_curr)
         for i in range(len(w)): pdf.rect(10 + sum(w[:i]), y_curr, w[i], row_h)
         pdf.set_y(y_curr + row_h)
@@ -569,7 +576,6 @@ def generate_bol_pdf(df, inv_number, inv_date, shipper_txt, consignee_txt, carri
         for i, h in enumerate(headers): pdf.cell(w[i], 8, h, 1, 0, 'C', fill=True)
         pdf.ln()
         pdf.set_font("Helvetica", '', 9)
-        # Grid Row Helper
         def print_grid_row(data_list):
             def get_lines(text, width):
                 if not text: return 1
@@ -600,7 +606,6 @@ def generate_bol_pdf(df, inv_number, inv_date, shipper_txt, consignee_txt, carri
         print_grid_row(row1)
         row2 = [("", 'C'), (f"{cartons} CTN", 'C'), ("(Contains roasted coffee in bags)", 'L'), ("", 'R'), ("", 'C')]
         print_grid_row(row2)
-        
         pdf.ln(10)
         pdf.set_font("Helvetica", '', 8); legal = "RECEIVED, subject to the classifications and tariffs..."; pdf.multi_cell(0, 4, legal); pdf.ln(15)
         y_sig = pdf.get_y(); pdf.line(10, y_sig, 90, y_sig); pdf.line(110, y_sig, 190, y_sig)
@@ -614,7 +619,7 @@ def generate_bol_pdf(df, inv_number, inv_date, shipper_txt, consignee_txt, carri
     return bytes(pdf.output())
 
 def generate_customscity_csv(df, inv_number, inv_date, c_addr, c_city, c_state, c_zip, hbol_number, carrier_code):
-    c_name = "Kung Tsang Yi" # Placeholder Name
+    c_name = "Kung Tsang Yi" 
     weekday = inv_date.weekday()
     days_to_add = 3 if weekday == 4 else (2 if weekday == 5 else 1)
     est_arrival = inv_date + timedelta(days=days_to_add)
@@ -630,7 +635,7 @@ def generate_customscity_csv(df, inv_number, inv_date, c_addr, c_city, c_state, 
             'Shipper City': 'MONTREAL', 'Shipper Country': 'CA', 'Consignee Name': c_name,
             'Consignee Address': c_addr.replace('\n', ', '),
             'Consignee City': c_city, 'Consignee State or Province': c_state, 'Consignee Postal Code': c_zip, 'Consignee Country': 'US',
-            'Description': row['Description'], 'Product ID': row['Variant code / SKU'], 'Carrier Name': carrier_code, 'Vessel Name': '',
+            'Description': row['Description'], 'Product ID': row.get('Variant code / SKU', 'VARIOUS'), 'Carrier Name': carrier_code, 'Vessel Name': '',
             'Voyage Trip Flight Number': hbol_number, 'Rail Car Number': ''
         })
     return pd.DataFrame(rows).to_csv(index=False).encode('utf-8')
@@ -762,11 +767,23 @@ if page == "Batches (Dashboard)":
         st.markdown("---")
         if not df.empty:
             df['Transfer Total'] = df['Quantity'] * df['Transfer Price (Unit)']
-            consolidated = df.groupby(['Variant code / SKU', 'Product Name', 'Description']).agg({
-                'Quantity': 'sum', 'HTS Code': 'first', 'FDA Code': 'first', 
-                'Weight (lbs)': 'first', 'country_of_origin': 'first',
-                'Transfer Price (Unit)': 'mean', 'Transfer Total': 'sum'
+            
+            # --- CONSOLIDATION LOGIC START ---
+            # Fill N/A in FDA/Origin to prevent "NaN" splitting groups
+            df['FDA Code'] = df['FDA Code'].fillna("N/A")
+            df['country_of_origin'] = df['country_of_origin'].fillna("N/A")
+
+            consolidated = df.groupby(['HTS Code', 'Weight (lbs)', 'country_of_origin', 'FDA Code']).agg({
+                'Quantity': 'sum',
+                'Transfer Total': 'sum',
+                'Product Name': 'first',
+                'Description': 'first',
+                'Variant code / SKU': lambda x: ', '.join(x.unique()) if len(x.unique()) < 3 else 'VARIOUS'
             }).reset_index()
+            
+            # Recalculate Unit Price (Weighted Average)
+            consolidated['Transfer Price (Unit)'] = consolidated['Transfer Total'] / consolidated['Quantity']
+            # --- CONSOLIDATION LOGIC END ---
             
             edited_df = st.data_editor(consolidated, num_rows="dynamic", use_container_width=True,
                 column_config={"Transfer Price (Unit)": st.column_config.NumberColumn("Unit Price ($)", format="$%.2f"),
@@ -817,7 +834,7 @@ if page == "Batches (Dashboard)":
             with c_csv_btn: st.download_button("📥 CustomsCity CSV", csv_data, f"CustomsCity_{base_id}.csv", type="primary", key=f"dl_csv_{batch_id}")
             with c_csv_link: st.markdown("""<div style="margin-top: 8px;"><a href="https://app.customscity.com/upload/document/" target="_blank" style="font-weight: 600; color: #6F4E37; text-decoration: none;">🚀 Upload to CustomsCity</a></div>""", unsafe_allow_html=True)
             
-            # EMAIL CENTER
+            # EMAIL CENTER (Omitted for brevity, same as previous)
             st.markdown("---")
             st.subheader("📧 Email Center")
             with st.expander("⚙️ Sender Settings", expanded=True):
