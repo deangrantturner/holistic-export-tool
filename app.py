@@ -17,14 +17,13 @@ import random
 import json
 import time
 
-# --- GLOBAL DEFAULTS (UPDATED) ---
+# --- GLOBAL DEFAULTS ---
 DEFAULT_SHIPPER = """Holistic Roasters inc.
 3780 St-Patrick
 Montreal, QC, Canada H4E 1A2
 BN/GST: 780810917RC0001
 TVQ: 1225279701TQ0001"""
 
-# UPDATED CONSIGNEE DEFAULTS
 DEF_CONS_NAME = "Border Mail Depot"
 DEF_CONS_ADDR = "102 W. Service Road"
 DEF_CONS_CITY = "Champlain"
@@ -196,7 +195,8 @@ def create_batch(name):
     est = pytz.timezone('US/Eastern')
     now = datetime.now(est).strftime("%Y-%m-%d %H:%M:%S")
     
-    # Defaults (Now using the updated CONSTANTS at the top)
+    saved_cons = get_setting('default_consignee')
+    def_cons = saved_cons.decode('utf-8') if saved_cons else DEFAULT_CONSIGNEE_FULL
     saved_notes = get_setting('default_notes')
     def_notes = saved_notes.decode('utf-8') if saved_notes else DEFAULT_NOTES
     saved_carrier = get_setting('default_carrier')
@@ -372,7 +372,6 @@ def generate_ci_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_sh
     pdf.set_xy(100, y_mid); pdf.set_fill_color(245, 245, 245); pdf.rect(100, y_mid, 95, 30, 'F')
     pdf.set_xy(102, y_mid + 2); pdf.set_font("Helvetica", 'B', 9); pdf.cell(50, 5, "NOTES / BROKER / FDA:", 0, 1); pdf.set_xy(102, pdf.get_y()); pdf.set_font("Helvetica", '', 8); pdf.multi_cell(90, 4, notes); pdf.set_y(y_mid + 35)
     
-    # Updated Table Columns: Added UNIT WT
     w = [10, 40, 20, 20, 12, 15, 20, 25]; headers = ["QTY", "DESCRIPTION", "HTS #", "FDA", "ORIGIN", "UNIT WT", "UNIT ($)", "TOTAL ($)"]
     
     pdf.set_font("Helvetica", 'B', 7); pdf.set_fill_color(220, 220, 220)
@@ -428,12 +427,11 @@ def generate_ci_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_sh
 
     pdf.ln(2); pdf.set_font("Helvetica", 'B', 9); pdf.cell(sum(w[:-1]), 8, "TOTAL VALUE (USD):", 0, 0, 'R'); pdf.cell(w[-1], 8, f"${total_val:,.2f}", 1, 1, 'R')
     
-    # --- FIX: Ensure Signature is Below Text ---
-    pdf.ln(10) # Add vertical spacing before declaration
+    pdf.ln(10)
     pdf.set_font("Helvetica", '', 10)
     pdf.cell(0, 5, "I declare that all information contained in this invoice to be true and correct.", 0, 1, 'L')
     
-    pdf.ln(15) # Add spacing specifically for the signature image
+    pdf.ln(15) 
     y_sig_line = pdf.get_y()
     
     pdf.set_font("Helvetica", 'B', 10)
@@ -442,22 +440,28 @@ def generate_ci_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_sh
     if sig_bytes:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp: tmp.write(sig_bytes); tmp_path = tmp.name
         try: 
-            # Place signature ABOVE the name line, but below the declaration text
             pdf.image(tmp_path, x=10, y=y_sig_line - 15, w=40) 
         except: pass
         os.unlink(tmp_path)
     return bytes(pdf.output())
 
-# ... (SI, PL, PO, BOL Generators same as before) ...
-
 def generate_si_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes, total_val, sig_bytes, signer_name):
     pdf = ProInvoice(); pdf.alias_nb_pages(); pdf.add_page(); pdf.set_auto_page_break(auto=False)
     pdf.set_font('Helvetica', 'B', 20); pdf.cell(0, 10, "SALES INVOICE", 0, 1, 'C'); pdf.ln(5)
+    
+    # Header
     pdf.set_font("Helvetica", '', 9); y_start = pdf.get_y()
     pdf.set_xy(10, y_start); pdf.set_font("Helvetica", 'B', 10); pdf.cell(70, 5, "SHIPPER / EXPORTER:", 0, 1); pdf.set_x(10); pdf.set_font("Helvetica", '', 9); pdf.multi_cell(70, 4, addr_from)
     pdf.set_xy(90, y_start); pdf.set_font("Helvetica", 'B', 10); pdf.cell(70, 5, "SHIP TO:", 0, 1); pdf.set_xy(90, pdf.get_y()); pdf.set_font("Helvetica", '', 9); pdf.multi_cell(70, 4, addr_ship)
-    pdf.set_xy(160, y_start); pdf.set_font("Helvetica", 'B', 12); pdf.cell(40, 6, f"Invoice #: {inv_num}", 0, 1, 'R'); pdf.set_x(160); pdf.set_font("Helvetica", '', 10); pdf.cell(40, 6, f"Date: {inv_date}", 0, 1, 'R'); pdf.set_x(160); pdf.cell(40, 6, "Currency: USD", 0, 1, 'R')
+    
+    # Top Right Info Block
+    pdf.set_xy(160, y_start); pdf.set_font("Helvetica", 'B', 12); pdf.cell(40, 6, f"Invoice #: {inv_num}", 0, 1, 'R')
+    pdf.set_x(160); pdf.set_font("Helvetica", '', 10); pdf.cell(40, 6, f"Date: {inv_date}", 0, 1, 'R')
+    pdf.set_x(160); pdf.cell(40, 6, f"Due Date: {inv_date}", 0, 1, 'R') # Added Due Date
+    pdf.set_x(160); pdf.cell(40, 6, "Currency: USD", 0, 1, 'R')
+
     y_mid = max(pdf.get_y(), 50) + 10; pdf.set_xy(10, y_mid); pdf.set_font("Helvetica", 'B', 10); pdf.cell(80, 5, "BILL TO:", 0, 1); pdf.set_x(10); pdf.set_font("Helvetica", '', 9); pdf.multi_cell(80, 4, addr_to); pdf.set_y(y_mid + 35)
+    
     w = [20, 100, 35, 35]; headers = ["QTY", "PRODUCT", "UNIT ($)", "TOTAL ($)"]
     pdf.set_font("Helvetica", 'B', 7); pdf.set_fill_color(220, 220, 220); 
     for i, h in enumerate(headers): pdf.cell(w[i], 8, h, 1, 0, 'C', fill=True)
