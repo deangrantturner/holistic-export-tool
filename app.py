@@ -353,7 +353,7 @@ class ProInvoice(FPDF):
     def footer(self):
         self.set_y(-15); self.set_font('Helvetica', 'I', 8); self.cell(0, 10, f'Page {self.page_no()} of {{nb}}', 0, 0, 'R')
 
-# --- PDF Generators (UPDATED TO USE DESCRIPTION) ---
+# --- PDF Generators (COMMERCIAL INVOICE UPDATED) ---
 def generate_ci_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes, total_val, sig_bytes=None, signer_name="Dean Turner"):
     pdf = ProInvoice(); pdf.alias_nb_pages(); pdf.add_page(); pdf.set_auto_page_break(auto=False)
     pdf.set_font('Helvetica', 'B', 20); pdf.cell(0, 10, doc_type, 0, 1, 'C'); pdf.ln(5)
@@ -364,7 +364,10 @@ def generate_ci_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_sh
     y_mid = max(pdf.get_y(), 60) + 10; pdf.set_xy(10, y_mid); pdf.set_font("Helvetica", 'B', 10); pdf.cell(80, 5, "IMPORTER OF RECORD:", 0, 1); pdf.set_x(10); pdf.set_font("Helvetica", '', 9); pdf.multi_cell(80, 4, addr_to)
     pdf.set_xy(100, y_mid); pdf.set_fill_color(245, 245, 245); pdf.rect(100, y_mid, 95, 30, 'F')
     pdf.set_xy(102, y_mid + 2); pdf.set_font("Helvetica", 'B', 9); pdf.cell(50, 5, "NOTES / BROKER / FDA:", 0, 1); pdf.set_xy(102, pdf.get_y()); pdf.set_font("Helvetica", '', 8); pdf.multi_cell(90, 4, notes); pdf.set_y(y_mid + 35)
+    
+    # Updated Table Columns: Added UNIT WT
     w = [10, 40, 20, 20, 12, 15, 20, 25]; headers = ["QTY", "DESCRIPTION", "HTS #", "FDA", "ORIGIN", "UNIT WT", "UNIT ($)", "TOTAL ($)"]
+    
     pdf.set_font("Helvetica", 'B', 7); pdf.set_fill_color(220, 220, 220)
     for i, h in enumerate(headers): pdf.cell(w[i], 8, h, 1, 0, 'C', fill=True)
     pdf.ln(); pdf.set_font("Helvetica", '', 7)
@@ -385,8 +388,7 @@ def generate_ci_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_sh
     line_h = 5
     for _, row in df.iterrows():
         origin = str(row.get('country_of_origin', 'CA'))
-        # CHANGED: Use Description instead of Product Name
-        desc = str(row['Description'])
+        desc = str(row['Product Name'])
         
         d_row = [
             (str(int(row['Quantity'])), 'C'), 
@@ -418,13 +420,28 @@ def generate_ci_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_sh
         pdf.set_y(y_curr + row_h)
 
     pdf.ln(2); pdf.set_font("Helvetica", 'B', 9); pdf.cell(sum(w[:-1]), 8, "TOTAL VALUE (USD):", 0, 0, 'R'); pdf.cell(w[-1], 8, f"${total_val:,.2f}", 1, 1, 'R')
-    pdf.ln(10); pdf.set_font("Helvetica", '', 10); pdf.cell(0, 5, "I declare that all information contained in this invoice to be true and correct.", 0, 1, 'L'); pdf.ln(10); pdf.set_font("Helvetica", 'B', 10); pdf.cell(0, 5, signer_name, 0, 1, 'L')
+    
+    # --- FIX: Ensure Signature is Below Text ---
+    pdf.ln(10) # Add vertical spacing before declaration
+    pdf.set_font("Helvetica", '', 10)
+    pdf.cell(0, 5, "I declare that all information contained in this invoice to be true and correct.", 0, 1, 'L')
+    
+    pdf.ln(15) # Add spacing specifically for the signature image
+    y_sig_line = pdf.get_y()
+    
+    pdf.set_font("Helvetica", 'B', 10)
+    pdf.cell(0, 5, signer_name, 0, 1, 'L')
+    
     if sig_bytes:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp: tmp.write(sig_bytes); tmp_path = tmp.name
-        try: pdf.image(tmp_path, x=10, y=pdf.get_y()-20, w=40)
+        try: 
+            # Place signature ABOVE the name line, but below the declaration text
+            pdf.image(tmp_path, x=10, y=y_sig_line - 15, w=40) 
         except: pass
         os.unlink(tmp_path)
     return bytes(pdf.output())
+
+# ... (SI, PL, PO, BOL Generators same as before) ...
 
 def generate_si_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes, total_val, sig_bytes, signer_name):
     pdf = ProInvoice(); pdf.alias_nb_pages(); pdf.add_page(); pdf.set_auto_page_break(auto=False)
@@ -438,6 +455,7 @@ def generate_si_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes,
     pdf.set_font("Helvetica", 'B', 7); pdf.set_fill_color(220, 220, 220); 
     for i, h in enumerate(headers): pdf.cell(w[i], 8, h, 1, 0, 'C', fill=True)
     pdf.ln(); pdf.set_font("Helvetica", '', 7)
+    
     def get_lines(text, width):
         if not text: return 1
         lines = 0; 
@@ -450,10 +468,10 @@ def generate_si_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes,
                 else: curr_w += word_w
             lines += lines_para
         return lines
+
     line_h = 5
     for _, row in df.iterrows():
-        # CHANGED: Use Description
-        d_row = [(str(int(row['Quantity'])), 'C'), (str(row['Description']), 'L'), (f"{row['Transfer Price (Unit)']:.2f}", 'R'), (f"{row['Transfer Total']:.2f}", 'R')]
+        d_row = [(str(int(row['Quantity'])), 'C'), (str(row['Product Name']), 'L'), (f"{row['Transfer Price (Unit)']:.2f}", 'R'), (f"{row['Transfer Total']:.2f}", 'R')]
         max_lines = 1
         for i, (txt, align) in enumerate(d_row):
             lines = get_lines(txt, w[i] - 2)
@@ -465,11 +483,11 @@ def generate_si_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes,
             pdf.ln(); pdf.set_font("Helvetica", '', 7)
         y_curr = pdf.get_y(); x_curr = 10
         for i, (txt, align) in enumerate(d_row):
-            pdf.set_xy(x_curr + sum(w[:i]), y_curr)
-            pdf.multi_cell(w[i], line_h, txt, 0, align)
+            pdf.set_xy(x_curr + sum(w[:i]), y_curr); pdf.multi_cell(w[i], line_h, txt, 0, align)
         pdf.set_xy(10, y_curr)
         for i in range(len(w)): pdf.rect(10 + sum(w[:i]), y_curr, w[i], row_h)
         pdf.set_y(y_curr + row_h)
+
     pdf.ln(2); pdf.set_font("Helvetica", 'B', 9); pdf.cell(sum(w[:-1]), 8, "TOTAL AMOUNT DUE (USD):", 0, 0, 'R'); pdf.cell(w[-1], 8, f"${total_val:,.2f}", 1, 1, 'R')
     return bytes(pdf.output())
 
@@ -501,8 +519,7 @@ def generate_pl_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, carton
 
     line_h = 5
     for _, row in df.iterrows():
-        # CHANGED: Use Description
-        d_row = [(str(int(row['Quantity'])), 'C'), (str(row['Description']), 'L')]
+        d_row = [(str(int(row['Quantity'])), 'C'), (str(row['Product Name']), 'L')]
         max_lines = 1
         for i, (txt, align) in enumerate(d_row):
             lines = get_lines(txt, w[i] - 2)
@@ -537,6 +554,7 @@ def generate_po_pdf(df, inv_num, inv_date, addr_buyer, addr_vendor, addr_ship, t
     pdf.set_font("Helvetica", 'B', 7); pdf.set_fill_color(220, 220, 220)
     for i, h in enumerate(headers): pdf.cell(w[i], 8, h, 1, 0, 'C', fill=True)
     pdf.ln(); pdf.set_font("Helvetica", '', 7)
+    
     def get_lines(text, width):
         if not text: return 1
         lines = 0; 
@@ -549,19 +567,21 @@ def generate_po_pdf(df, inv_num, inv_date, addr_buyer, addr_vendor, addr_ship, t
                 else: curr_w += word_w
             lines += lines_para
         return lines
+
     line_h = 5
     for _, row in df.iterrows():
-        # CHANGED: Use Description
-        d_row = [(str(int(row['Quantity'])), 'C'), (str(row['Description']), 'L'), (f"{row['Transfer Price (Unit)']:.2f}", 'R'), (f"{row['Transfer Total']:.2f}", 'R')]
+        d_row = [(str(int(row['Quantity'])), 'C'), (str(row['Product Name']), 'L'), (f"{row['Transfer Price (Unit)']:.2f}", 'R'), (f"{row['Transfer Total']:.2f}", 'R')]
         max_lines = 1
         for i, (txt, align) in enumerate(d_row):
             lines = get_lines(txt, w[i] - 2)
             if lines > max_lines: max_lines = lines
         row_h = max_lines * line_h
+        
         if pdf.get_y() + row_h > 270:
             pdf.add_page(); pdf.set_font("Helvetica", 'B', 7); pdf.set_fill_color(220, 220, 220)
             for i, h in enumerate(headers): pdf.cell(w[i], 8, h, 1, 0, 'C', fill=True)
             pdf.ln(); pdf.set_font("Helvetica", '', 7)
+            
         y_curr = pdf.get_y(); x_curr = 10
         for i, (txt, align) in enumerate(d_row):
             pdf.set_xy(x_curr + sum(w[:i]), y_curr)
@@ -569,6 +589,7 @@ def generate_po_pdf(df, inv_num, inv_date, addr_buyer, addr_vendor, addr_ship, t
         pdf.set_xy(10, y_curr)
         for i in range(len(w)): pdf.rect(10 + sum(w[:i]), y_curr, w[i], row_h)
         pdf.set_y(y_curr + row_h)
+
     pdf.ln(2); pdf.set_font("Helvetica", 'B', 9); pdf.cell(sum(w[:-1]), 8, "TOTAL (USD):", 0, 0, 'R'); pdf.cell(w[-1], 8, f"${total_val:,.2f}", 1, 1, 'R')
     return bytes(pdf.output())
 
@@ -589,6 +610,7 @@ def generate_bol_pdf(df, inv_number, inv_date, shipper_txt, consignee_txt, carri
         for i, h in enumerate(headers): pdf.cell(w[i], 8, h, 1, 0, 'C', fill=True)
         pdf.ln()
         pdf.set_font("Helvetica", '', 9)
+        # Grid Row Helper
         def print_grid_row(data_list):
             def get_lines(text, width):
                 if not text: return 1
@@ -647,9 +669,7 @@ def generate_customscity_csv(df, inv_number, inv_date, c_name, c_addr, c_city, c
             'Shipper City': 'MONTREAL', 'Shipper Country': 'CA', 'Consignee Name': c_name,
             'Consignee Address': c_addr.replace('\n', ', '),
             'Consignee City': c_city, 'Consignee State or Province': c_state, 'Consignee Postal Code': c_zip, 'Consignee Country': 'US',
-            # CHANGED: Use Description (though CSV logic already had it, confirming it pulls correctly)
-            'Description': row['Description'], 
-            'Product ID': row.get('product_id', 'VARIOUS'), 'Carrier Name': carrier_code, 'Vessel Name': '',
+            'Description': row['Description'], 'Product ID': row.get('product_id', 'VARIOUS'), 'Carrier Name': carrier_code, 'Vessel Name': '',
             'Voyage Trip Flight Number': hbol_number, 'Rail Car Number': ''
         })
     return pd.DataFrame(rows).to_csv(index=False).encode('utf-8')
@@ -850,7 +870,7 @@ if page == "Batches (Dashboard)":
             with c_csv_btn: st.download_button("📥 CustomsCity CSV", csv_data, f"CustomsCity_{base_id}.csv", type="primary", key=f"dl_csv_{batch_id}")
             with c_csv_link: st.markdown("""<div style="margin-top: 8px;"><a href="https://app.customscity.com/upload/document/" target="_blank" style="font-weight: 600; color: #6F4E37; text-decoration: none;">🚀 Upload to CustomsCity</a></div>""", unsafe_allow_html=True)
             
-            # EMAIL CENTER
+            # EMAIL CENTER (Omitted for brevity, same as previous)
             st.markdown("---")
             st.subheader("📧 Email Center")
             with st.expander("⚙️ Sender Settings", expanded=True):
