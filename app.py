@@ -191,7 +191,10 @@ def create_batch(name):
         "inv_number": f"{date.today().strftime('%Y%m%d')}1",
         "inv_date": str(date.today()),
         "discount": 75.0,
-        "consignee": def_cons,
+        "cons_addr": DEF_CONS_ADDR,
+        "cons_city": DEF_CONS_CITY,
+        "cons_state": DEF_CONS_STATE,
+        "cons_zip": DEF_CONS_ZIP,
         "notes": def_notes,
         "carrier": def_carrier,
         "pallets": 1,
@@ -205,7 +208,12 @@ def create_batch(name):
         row = c.fetchone()
         if row:
             last_data = json.loads(row[0])
-            if 'consignee' in last_data and last_data['consignee']: new_data['consignee'] = last_data['consignee']
+            if 'cons_addr' in last_data: 
+                new_data['cons_addr'] = last_data['cons_addr']
+                new_data['cons_city'] = last_data['cons_city']
+                new_data['cons_state'] = last_data['cons_state']
+                new_data['cons_zip'] = last_data['cons_zip']
+            
             if 'notes' in last_data and last_data['notes']: new_data['notes'] = last_data['notes']
             if 'carrier' in last_data: new_data['carrier'] = last_data['carrier']
             if 'gross_weight' in last_data: new_data['gross_weight'] = last_data['gross_weight']
@@ -496,7 +504,6 @@ def generate_po_pdf(df, inv_num, inv_date, addr_buyer, addr_vendor, addr_ship, t
     pdf.set_xy(90, y_start); pdf.set_font("Helvetica", 'B', 10); pdf.cell(70, 5, "SHIP TO:", 0, 1); pdf.set_xy(90, pdf.get_y()); pdf.set_font("Helvetica", '', 9); pdf.multi_cell(70, 4, addr_ship)
     pdf.set_xy(160, y_start); pdf.set_font("Helvetica", 'B', 12); pdf.cell(40, 6, f"Invoice #: {inv_num}", 0, 1, 'R'); pdf.set_x(160); pdf.set_font("Helvetica", '', 10); pdf.cell(40, 6, f"Date: {inv_date}", 0, 1, 'R'); pdf.set_x(160); pdf.cell(40, 6, "Currency: USD", 0, 1, 'R')
     y_mid = max(pdf.get_y(), 50) + 10; pdf.set_xy(10, y_mid); pdf.set_font("Helvetica", 'B', 10); pdf.cell(80, 5, "TO (VENDOR):", 0, 1); pdf.set_x(10); pdf.set_font("Helvetica", '', 9); pdf.multi_cell(80, 4, addr_vendor); pdf.set_y(y_mid + 35)
-    
     w = [20, 100, 35, 35]; headers = ["QTY", "PRODUCT", "UNIT ($)", "TOTAL ($)"]
     pdf.set_font("Helvetica", 'B', 7); pdf.set_fill_color(220, 220, 220)
     for i, h in enumerate(headers): pdf.cell(w[i], 8, h, 1, 0, 'C', fill=True)
@@ -601,30 +608,11 @@ def generate_bol_pdf(df, inv_number, inv_date, shipper_txt, consignee_txt, carri
             os.unlink(tmp_path)
     return bytes(pdf.output())
 
-def generate_customscity_csv(df, inv_number, inv_date, ship_to_txt, hbol_number, carrier_code):
-    lines = [L.strip() for L in ship_to_txt.split('\n') if L.strip()]
-    c_name = lines[0] if len(lines) > 0 else ""; c_addr = ""; c_city = ""; c_state = ""; c_zip = ""; c_country = "US"
-    if len(lines) >= 2:
-        last_line = lines[-1]
-        if last_line.upper() in ["UNITED STATES", "USA", "US"]:
-            c_country = "US"
-            if len(lines) > 2: last_line = lines[-2]; c_addr = ", ".join(lines[1:-2])
-            else: c_addr = lines[1]
-        else:
-            if len(lines) > 2: c_addr = ", ".join(lines[1:-1])
-            else: c_addr = lines[1]
-        parts = last_line.split(',')
-        if len(parts) >= 1: c_city = parts[0].strip()
-        if len(parts) >= 2:
-            state_zip = parts[1].strip().split(' ')
-            state_zip = [x for x in state_zip if x]; 
-            if len(state_zip) >= 1: c_state = state_zip[0]
-            if len(state_zip) >= 2: c_zip = state_zip[1]
-    
+def generate_customscity_csv(df, inv_number, inv_date, c_addr, c_city, c_state, c_zip, hbol_number, carrier_code):
+    c_name = "Kung Tsang Yi" # Placeholder Name
     weekday = inv_date.weekday()
     days_to_add = 3 if weekday == 4 else (2 if weekday == 5 else 1)
     est_arrival = inv_date + timedelta(days=days_to_add)
-    
     rows = []
     for _, row in df.iterrows():
         fda = str(row.get('FDA Code', '')).strip()
@@ -634,9 +622,10 @@ def generate_customscity_csv(df, inv_number, inv_date, ship_to_txt, hbol_number,
             'MBOL/TRIP Number': hbol_number, 'HBOL/ Shipment Control Number': hbol_number,
             'Estimate Date of Arrival': est_arrival.strftime('%Y%m%d'), 'Time of Arrival': '18:00', 'US Port of Arrival': '0712',
             'Equipment Number': '', 'Shipper Name': 'HOLISTIC ROASTERS', 'Shipper Address': '3780 RUE SAINT-PATRICK',
-            'Shipper City': 'MONTREAL', 'Shipper Country': 'CA', 'Consignee Name': c_name, 'Consignee Address': c_addr,
-            'Consignee City': c_city, 'Consignee State or Province': c_state, 'Consignee Postal Code': c_zip, 'Consignee Country': c_country,
-            'Description': row['Description'], 'Product ID': row['Variant code / SKU'], 'Carrier Name': carrier_code, 'Vessel Name': '',
+            'Shipper City': 'MONTREAL', 'Shipper Country': 'CA', 'Consignee Name': c_name,
+            'Consignee Address': c_addr.replace('\n', ', '),
+            'Consignee City': c_city, 'Consignee State or Province': c_state, 'Consignee Postal Code': c_zip, 'Consignee Country': 'US',
+            'Description': row['Description'], 'Product ID': row.get('Variant code / SKU', 'VARIOUS'), 'Carrier Name': carrier_code, 'Vessel Name': '',
             'Voyage Trip Flight Number': hbol_number, 'Rail Car Number': ''
         })
     return pd.DataFrame(rows).to_csv(index=False).encode('utf-8')
@@ -649,7 +638,7 @@ if page == "Batches (Dashboard)":
         new_batch_name = st.text_input("Batch Name", value=f"Export-{date.today()}")
         if st.button("Create Batch"):
             create_batch(new_batch_name)
-            st.success("Batch created with previous settings! Select it below.")
+            st.success("Batch created! Select it below.")
             st.rerun()
     
     st.markdown("---")
@@ -703,46 +692,41 @@ if page == "Batches (Dashboard)":
                 b_date = st.date_input("Date", value=datetime.strptime(batch_data.get('inv_date', str(date.today())), "%Y-%m-%d"))
             
             with c2:
-                b_cons = st.text_area("Consignee", value=batch_data.get('consignee', ""), height=100)
+                st.markdown("**Consignee Details**")
+                c_addr = st.text_input("Street Address", value=batch_data.get('cons_addr', DEF_CONS_ADDR))
+                c3a, c3b, c3c = st.columns(3)
+                with c3a: c_city = st.text_input("City", value=batch_data.get('cons_city', DEF_CONS_CITY))
+                with c3b: c_state = st.text_input("State", value=batch_data.get('cons_state', DEF_CONS_STATE))
+                with c3c: c_zip = st.text_input("Zip Code", value=batch_data.get('cons_zip', DEF_CONS_ZIP))
+                full_consignee_txt = f"{c_addr}\n{c_city}, {c_state} {c_zip}\nUnited States"
                 b_notes = st.text_area("Notes", value=batch_data.get('notes', ""), height=100)
 
             st.subheader("📦 Orders")
-            # CATALOG CHECK
             cat_check = get_catalog()
-            if cat_check.empty:
-                st.error("🔴 Catalog is EMPTY. Please Restore Backup or Upload Catalog in the 'Catalog' tab.")
-            else:
-                st.success(f"✅ Catalog Loaded ({len(cat_check)} items)")
+            if cat_check.empty: st.error("🔴 Catalog is EMPTY. Please Restore Backup or Upload Catalog in the 'Catalog' tab.")
+            else: st.success(f"✅ Catalog Loaded ({len(cat_check)} items)")
 
             saved_orders_json = batch_data.get('orders_json')
-            
             uploaded_file = st.file_uploader("Upload CSV", type=['csv'])
             
-            # --- PARSE CSV OR LOAD JSON ---
             df = pd.DataFrame()
-            unique_orders_count = 1  # Default default
+            unique_orders_count = 1
             
             if uploaded_file:
-                # 1. NEW UPLOAD LOGIC
                 try:
                     raw_df = pd.read_csv(uploaded_file)
                     if 'Ship to country' in raw_df.columns:
                         us_shipments = raw_df[raw_df['Ship to country'] == 'United States'].copy()
                         if 'Item type' in raw_df.columns: us_shipments = us_shipments[us_shipments['Item type'] == 'product']
                         
-                        # --- COUNT UNIQUE ORDERS HERE ---
-                        # Try to find an order column
                         possible_cols = ['SO #', 'Name', 'Order Name', 'Order Number']
                         order_col = next((col for col in possible_cols if col in us_shipments.columns), None)
-                        if order_col:
-                            unique_orders_count = us_shipments[order_col].nunique()
+                        if order_col: unique_orders_count = us_shipments[order_col].nunique()
                         
-                        # Prepare Sales Data
                         sales_data = us_shipments[['Variant code / SKU', 'Item variant', 'Quantity', 'Price per unit']].copy()
                         sales_data['Variant code / SKU'] = sales_data['Variant code / SKU'].astype(str).str.strip()
                         sales_data['CSV_Price'] = pd.to_numeric(sales_data['Price per unit'], errors='coerce').fillna(0)
                         
-                        # Merge with Catalog
                         if not cat_check.empty:
                             cat_check['sku'] = cat_check['sku'].apply(clean_sku)
                             merged = pd.merge(sales_data, cat_check, left_on='Variant code / SKU', right_on='sku', how='left')
@@ -764,96 +748,70 @@ if page == "Batches (Dashboard)":
                             sales_data['Transfer Price (Unit)'] = sales_data['CSV_Price']
                             sales_data['country_of_origin'] = "CA"
                             df = sales_data
-                    else:
-                        st.error("Invalid CSV"); df = pd.DataFrame()
-                except Exception as e:
-                    st.error(f"Error reading CSV: {e}")
-            
+                    else: st.error("Invalid CSV"); df = pd.DataFrame()
+                except Exception as e: st.error(f"Error reading CSV: {e}")
             elif saved_orders_json:
-                # 2. LOAD SAVED LOGIC
-                try:
-                    df = pd.read_json(io.StringIO(saved_orders_json), orient='split')
-                except:
-                    st.error("Failed to load saved orders."); df = pd.DataFrame()
+                try: df = pd.read_json(io.StringIO(saved_orders_json), orient='split')
+                except: st.error("Failed to load saved orders."); df = pd.DataFrame()
 
-        # ORDERS TABLE (FULL WIDTH NOW)
         st.markdown("---")
         if not df.empty:
             df['Transfer Total'] = df['Quantity'] * df['Transfer Price (Unit)']
             
-            consolidated = df.groupby(['Variant code / SKU', 'Product Name', 'Description']).agg({
-                'Quantity': 'sum', 'HTS Code': 'first', 'FDA Code': 'first', 
-                'Weight (lbs)': 'first', 'country_of_origin': 'first',
-                'Transfer Price (Unit)': 'mean', 'Transfer Total': 'sum'
+            # --- CONSOLIDATION LOGIC START ---
+            # Group items by HTS, Weight, Origin, FDA (Logic for Customs)
+            # We aggregate Qty and Total $
+            # We take the FIRST Product Name and Description as the representative for the group
+            consolidated = df.groupby(['HTS Code', 'Weight (lbs)', 'country_of_origin', 'FDA Code']).agg({
+                'Quantity': 'sum',
+                'Transfer Total': 'sum',
+                'Product Name': 'first',
+                'Description': 'first',
+                # Keep SKU list if needed, or just say 'VARIOUS'
+                'Variant code / SKU': lambda x: ', '.join(x.unique()) if len(x.unique()) < 3 else 'VARIOUS'
             }).reset_index()
             
-            # FULL WIDTH TABLE
-            edited_df = st.data_editor(
-                consolidated, 
-                num_rows="dynamic",
-                use_container_width=True, # THIS FIXES THE WIDTH
-                column_config={
-                    "Transfer Price (Unit)": st.column_config.NumberColumn("Unit Price ($)", format="$%.2f"),
-                    "Transfer Total": st.column_config.NumberColumn("Total ($)", format="$%.2f")
-                }
-            )
+            # Recalculate Unit Price (Weighted Average) to ensure Total matches
+            consolidated['Transfer Price (Unit)'] = consolidated['Transfer Total'] / consolidated['Quantity']
+            # --- CONSOLIDATION LOGIC END ---
+            
+            edited_df = st.data_editor(consolidated, num_rows="dynamic", use_container_width=True,
+                column_config={"Transfer Price (Unit)": st.column_config.NumberColumn("Unit Price ($)", format="$%.2f"),
+                               "Transfer Total": st.column_config.NumberColumn("Total ($)", format="$%.2f")})
             total_val = edited_df['Transfer Total'].sum()
             st.metric("Total Value", f"${total_val:,.2f}")
             
-            # --- LOGISTICS CALCULATIONS ---
             c_log1, c_log2, c_log3 = st.columns(3)
-            
-            with c_log1: 
-                pallets = st.number_input("Pallets", value=batch_data.get('pallets', 1))
-            
-            # CARTONS LOGIC
+            with c_log1: pallets = st.number_input("Pallets", value=batch_data.get('pallets', 1))
             saved_cartons = batch_data.get('cartons', 1)
-            # If we just uploaded a fresh CSV (uploaded_file is not None) and found >1 unique orders, use that count.
-            # Otherwise fall back to saved value.
-            if uploaded_file and unique_orders_count > 1:
-                default_cartons = unique_orders_count
-            else:
-                default_cartons = saved_cartons
-                
-            with c_log2: 
-                cartons = st.number_input("Cartons", value=default_cartons)
-            
-            # WEIGHT LOGIC
+            default_cartons = unique_orders_count if uploaded_file and unique_orders_count > 1 else saved_cartons
+            with c_log2: cartons = st.number_input("Cartons", value=default_cartons)
             calc_w = (edited_df['Quantity'] * edited_df['Weight (lbs)']).sum()
             saved_gw = batch_data.get('gross_weight', 0.0)
-            
-            # If never saved (0.0) OR fresh upload, use calculated.
-            if saved_gw == 0.0 or uploaded_file:
-                default_gw = calc_w + (pallets * 40)
-            else:
-                default_gw = saved_gw
-                
-            with c_log3: 
-                gross_weight = st.number_input("Gross Weight", value=float(default_gw))
+            default_gw = calc_w + (pallets * 40) if saved_gw == 0.0 or uploaded_file else saved_gw
+            with c_log3: gross_weight = st.number_input("Gross Weight", value=float(default_gw))
 
             st.markdown("---")
-            
             if st.button("💾 SAVE BATCH PROGRESS", type="primary"):
                 save_data = {
                     "inv_number": b_inv_num, "inv_date": str(b_date), 
-                    # Discount removed from save
-                    "consignee": b_cons, "notes": b_notes, "carrier": sel_carrier,
+                    "cons_addr": c_addr, "cons_city": c_city, "cons_state": c_state, "cons_zip": c_zip,
+                    "notes": b_notes, "carrier": sel_carrier,
                     "pallets": pallets, "cartons": cartons, "gross_weight": gross_weight,
                     "orders_json": edited_df.to_json(orient='split')
                 }
                 update_batch(batch_id, save_data)
-                st.success("✅ Saved! You can close the tab safely.")
-                show_backup_prompt("batch_save")
+                st.success("✅ Saved! You can close the tab safely."); show_backup_prompt("batch_save")
                 
             st.subheader("🖨️ Documents")
             base_id = b_inv_num; hbol = f"HRUS{base_id}"
             
-            pdf_ci = generate_ci_pdf("COMMERCIAL INVOICE", edited_df, f"CI-HRUS{base_id}", b_date, DEFAULT_SHIPPER, DEFAULT_IMPORTER, b_cons, b_notes, total_val, get_signature(), "Dean Turner")
-            pdf_po = generate_po_pdf(edited_df, f"PO-HRUS{base_id}", b_date, DEFAULT_IMPORTER, DEFAULT_SHIPPER, b_cons, total_val)
-            pdf_si = generate_si_pdf(edited_df, f"SI-HRUS{base_id}", b_date, DEFAULT_SHIPPER, DEFAULT_IMPORTER, b_cons, b_notes, total_val, get_signature(), "Dean Turner")
-            pdf_pl = generate_pl_pdf(edited_df, f"PL-HRUS{base_id}", b_date, DEFAULT_SHIPPER, DEFAULT_IMPORTER, b_cons, cartons)
-            pdf_bol = generate_bol_pdf(edited_df, b_inv_num, b_date, DEFAULT_SHIPPER, b_cons, carrier_name, hbol, pallets, cartons, gross_weight, get_signature())
-            csv_data = generate_customscity_csv(edited_df, b_inv_num, b_date, b_cons, hbol, carrier_code)
+            pdf_ci = generate_ci_pdf("COMMERCIAL INVOICE", edited_df, f"CI-HRUS{base_id}", b_date, DEFAULT_SHIPPER, DEFAULT_IMPORTER, full_consignee_txt, b_notes, total_val, get_signature(), "Dean Turner")
+            pdf_po = generate_po_pdf(edited_df, f"PO-HRUS{base_id}", b_date, DEFAULT_IMPORTER, DEFAULT_SHIPPER, full_consignee_txt, total_val)
+            pdf_si = generate_si_pdf(edited_df, f"SI-HRUS{base_id}", b_date, DEFAULT_SHIPPER, DEFAULT_IMPORTER, full_consignee_txt, b_notes, total_val, get_signature(), "Dean Turner")
+            pdf_pl = generate_pl_pdf(edited_df, f"PL-HRUS{base_id}", b_date, DEFAULT_SHIPPER, DEFAULT_IMPORTER, full_consignee_txt, cartons)
+            pdf_bol = generate_bol_pdf(edited_df, b_inv_num, b_date, DEFAULT_SHIPPER, full_consignee_txt, carrier_name, hbol, pallets, cartons, gross_weight, get_signature())
+            csv_data = generate_customscity_csv(edited_df, b_inv_num, b_date, c_addr, c_city, c_state, c_zip, hbol, carrier_code)
             
             c1, c2, c3, c4, c5 = st.columns(5)
             with c1: st.download_button("CI PDF", pdf_ci, f"CI-HRUS{base_id}.pdf", key=f"dl_ci_{batch_id}")
@@ -866,7 +824,7 @@ if page == "Batches (Dashboard)":
             with c_csv_btn: st.download_button("📥 CustomsCity CSV", csv_data, f"CustomsCity_{base_id}.csv", type="primary", key=f"dl_csv_{batch_id}")
             with c_csv_link: st.markdown("""<div style="margin-top: 8px;"><a href="https://app.customscity.com/upload/document/" target="_blank" style="font-weight: 600; color: #6F4E37; text-decoration: none;">🚀 Upload to CustomsCity</a></div>""", unsafe_allow_html=True)
             
-            # EMAIL CENTER
+            # EMAIL CENTER (Omitted for brevity, same as previous)
             st.markdown("---")
             st.subheader("📧 Email Center")
             with st.expander("⚙️ Sender Settings", expanded=True):
@@ -877,8 +835,7 @@ if page == "Batches (Dashboard)":
                 sender_pass = st.text_input("App Password", value=default_pass, type="password")
                 if st.button("💾 Save Credentials"):
                     save_setting('smtp_email', sender_email.encode()); save_setting('smtp_pass', sender_pass.encode())
-                    st.success("Saved!")
-                    show_backup_prompt("email_creds")
+                    st.success("Saved!"); show_backup_prompt("email_creds")
 
             recipient_email = st.text_input("Send To:", value="dean.turner@holisticroasters.com")
             attach_backup = st.checkbox("Attach App Backup (invoices.db)", value=True, help="Useful for restoring settings if the app reboots.")
@@ -886,27 +843,19 @@ if page == "Batches (Dashboard)":
             if st.button("📧 Email All Documents", type="primary"):
                 if not sender_pass: st.error("Please enter your App Password in the settings above.")
                 else:
-                    new_ver = b_inv_num # Use current invoice number
-                    # Log history
-                    save_invoice_metadata(b_inv_num, total_val, DEFAULT_IMPORTER.split('\n')[0])
-                    finalize_batch_in_db(batch_id)
-                    
+                    new_ver = b_inv_num; save_invoice_metadata(b_inv_num, total_val, DEFAULT_IMPORTER.split('\n')[0]); finalize_batch_in_db(batch_id)
                     files_to_send = [
-                        {'name': f"{base_id}_CI.pdf", 'data': pdf_ci},
-                        {'name': f"{base_id}_PO.pdf", 'data': pdf_po},
-                        {'name': f"{base_id}_SI.pdf", 'data': pdf_si},
-                        {'name': f"{base_id}_PL.pdf", 'data': pdf_pl},
-                        {'name': f"{base_id}_BOL.pdf", 'data': pdf_bol},
+                        {'name': f"CI-HRUS{base_id}.pdf", 'data': pdf_ci},
+                        {'name': f"PO-HRUS{base_id}.pdf", 'data': pdf_po},
+                        {'name': f"SI-HRUS{base_id}.pdf", 'data': pdf_si},
+                        {'name': f"PL-HRUS{base_id}.pdf", 'data': pdf_pl},
+                        {'name': f"BOL-HRUS{base_id}.pdf", 'data': pdf_bol},
                         {'name': f"CustomsCity_{base_id}.csv", 'data': csv_data}
                     ]
                     if attach_backup and os.path.exists('invoices.db'):
                         with open('invoices.db', 'rb') as f: files_to_send.append({'name': f'backup_holistic_{date.today()}.db', 'data': f.read()})
-                    
                     success, msg = send_email_with_attachments(sender_email, sender_pass, recipient_email, f"Export Docs: {new_ver}", f"Attached documents for {new_ver}.", files_to_send)
-                    if success: 
-                        st.balloons()
-                        st.success(f"✅ Sent to {recipient_email}")
-                        st.rerun()
+                    if success: st.balloons(); st.success(f"✅ Sent to {recipient_email}"); st.rerun()
                     else: st.error(f"Failed: {msg}")
 
 # ==================== PAGE 2: CATALOG ====================
@@ -916,37 +865,23 @@ elif page == "Catalog":
     
     c1, c2, c3 = st.columns(3)
     with c1:
-        # Create Template
         template_df = pd.DataFrame(columns=['sku', 'product_name', 'description', 'hts_code', 'fda_code', 'weight_lbs', 'unit_price', 'country_of_origin'])
         st.download_button("Download Template", template_df.to_csv(index=False).encode(), "catalog_template.csv", key="cat_dl_temp")
-        
         curr_cat = get_catalog()
         if not curr_cat.empty: st.download_button("Download Current Catalog", curr_cat.to_csv(index=False).encode(), "catalog.csv", key="cat_dl_btn")
     with c2:
         up_cat = st.file_uploader("Upload Catalog", type=['csv'])
         if up_cat:
-            upsert_catalog_from_df(pd.read_csv(up_cat))
-            st.success("Updated!"); show_backup_prompt("cat_up"); st.rerun()
-            
+            upsert_catalog_from_df(pd.read_csv(up_cat)); st.success("Updated!"); show_backup_prompt("cat_up"); st.rerun()
     with c3:
-        if st.button("⚠️ Clear Catalog"):
-            clear_catalog()
-            st.rerun()
+        if st.button("⚠️ Clear Catalog"): clear_catalog(); st.rerun()
             
     if not curr_cat.empty:
-        edited = st.data_editor(
-            curr_cat, 
-            num_rows="dynamic",
-            use_container_width=True,
-            column_config={
-                "unit_price": st.column_config.NumberColumn("Price ($)", format="$%.2f"),
-                "weight_lbs": st.column_config.NumberColumn("Weight (lbs)", format="%.2f"),
-                "country_of_origin": st.column_config.TextColumn("Origin (e.g. CA)")
-            }
-        )
-        if st.button("💾 Save Catalog Changes"):
-            upsert_catalog_from_df(edited)
-            st.success("Saved! NOW DOWNLOAD BACKUP ->"); show_backup_prompt("cat_save")
+        edited = st.data_editor(curr_cat, num_rows="dynamic", use_container_width=True,
+            column_config={"unit_price": st.column_config.NumberColumn("Price ($)", format="$%.2f"),
+                           "weight_lbs": st.column_config.NumberColumn("Weight (lbs)", format="%.2f"),
+                           "country_of_origin": st.column_config.TextColumn("Origin (e.g. CA)")})
+        if st.button("💾 Save Catalog Changes"): upsert_catalog_from_df(edited); st.success("Saved! NOW DOWNLOAD BACKUP ->"); show_backup_prompt("cat_save")
 
 # ==================== PAGE 3: HISTORY ====================
 elif page == "Archive (History)":
