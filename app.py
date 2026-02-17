@@ -201,7 +201,8 @@ def create_batch(name):
     saved_notes = get_setting('default_notes')
     def_notes = saved_notes.decode('utf-8') if saved_notes else DEFAULT_NOTES
     saved_carrier = get_setting('default_carrier')
-    def_carrier = saved_carrier.decode('utf-8') if saved_carrier else "FX (FedEx)"
+    # CHANGED DEFAULT TO GCYD
+    def_carrier = saved_carrier.decode('utf-8') if saved_carrier else "GCYD (Green City Courier)"
 
     new_data = {
         "inv_number": f"{date.today().strftime('%Y%m%d')}1",
@@ -234,7 +235,9 @@ def create_batch(name):
             if 'cons_other' in last_data: new_data['cons_other'] = last_data['cons_other']
             
             if 'notes' in last_data and last_data['notes']: new_data['notes'] = last_data['notes']
+            # Inherit carrier if it exists, otherwise use new default
             if 'carrier' in last_data: new_data['carrier'] = last_data['carrier']
+            
             if 'gross_weight' in last_data: new_data['gross_weight'] = last_data['gross_weight']
             if 'pallets' in last_data: new_data['pallets'] = last_data['pallets']
     except Exception as e:
@@ -361,7 +364,8 @@ class ProInvoice(FPDF):
     def footer(self):
         self.set_y(-15); self.set_font('Helvetica', 'I', 8); self.cell(0, 10, f'Page {self.page_no()} of {{nb}}', 0, 0, 'R')
 
-# --- PDF DRAW FUNCTIONS ---
+# --- PDF DRAW FUNCTIONS (Refactored for reuse in Master Print) ---
+
 def draw_ci_page(pdf, doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes, total_val, sig_bytes, signer_name):
     pdf.add_page()
     pdf.set_auto_page_break(auto=False)
@@ -754,9 +758,9 @@ if page == "Batches (Dashboard)":
                 
                 st.markdown("**Carrier**")
                 c_opts = ["FX (FedEx)", "GCYD (Green City Courier)", "Other"]
-                current_carrier = batch_data.get('carrier', "FX (FedEx)")
+                current_carrier = batch_data.get('carrier', "GCYD (Green City Courier)")
                 if current_carrier not in c_opts: current_carrier = "Other"
-                sel_carrier = st.selectbox("Carrier", c_opts, index=c_opts.index(current_carrier) if current_carrier in c_opts else 2)
+                sel_carrier = st.selectbox("Carrier", c_opts, index=c_opts.index(current_carrier) if current_carrier in c_opts else 1)
                 
                 carrier_code = "FX"; carrier_name = "FedEx (FX)"
                 if "GCYD" in sel_carrier: carrier_code = "GCYD"; carrier_name = "Green City Courier (GCYD)"
@@ -924,14 +928,6 @@ if page == "Batches (Dashboard)":
                 @st.dialog("Step 1: Print Documents 🖨️", width="large")
                 def show_print_dialog():
                     st.write("Please print the Master File (Contains: 3x Commercial Invoice, 2x Bill of Lading)")
-                    
-                    # --- EMBED PDF VIEWER FOR PRINTING (SAFER EMBED) ---
-                    b64 = base64.b64encode(pdf_master).decode()
-                    # Using <embed> often bypasses stricter iframe policies in some browsers
-                    pdf_display = f'<embed src="data:application/pdf;base64,{b64}" width="100%" height="500" type="application/pdf">'
-                    st.markdown(pdf_display, unsafe_allow_html=True)
-                    
-                    st.info("💡 If the preview above is blocked, please use the **Download** button below.")
                     
                     st.download_button("📥 Download Master Print File (5 Pages)", pdf_master, f"MasterPrint_{base_id}.pdf", type="primary")
 
