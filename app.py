@@ -973,8 +973,8 @@ if page == "Batches (Dashboard)":
             elif dialog_stage == 'step3':
                 @st.dialog("Step 3: Individual Files 📂", width="large")
                 def show_files_dialog():
+                    st.error("⚠️ **STOP!** Do not send the email yet. You are missing the FDA Prior Notice (Step 4).")
                     st.info(f"📧 Plan to email these documents to: **{carrier_name}**")
-                    st.write("Download individual documents if needed.")
                     
                     c1, c2, c3 = st.columns(3)
                     with c1: st.download_button("Commercial Invoice", pdf_ci, f"CI-HRUS{base_id}.pdf", use_container_width=True)
@@ -982,7 +982,7 @@ if page == "Batches (Dashboard)":
                     with c3: st.download_button("Bill of Lading", pdf_bol, f"BOL-HRUS{base_id}.pdf", use_container_width=True)
                     
                     st.markdown("---")
-                    st.link_button("📧 Open Gmail to Compose", "https://mail.google.com/", use_container_width=True)
+                    st.link_button("📧 Open Gmail to Compose", "https://mail.google.com/mail/u/0/#inbox?compose=new", use_container_width=True)
                     st.markdown("---")
                     
                     b1, b2 = st.columns(2)
@@ -1024,7 +1024,7 @@ if page == "Batches (Dashboard)":
                 @st.dialog("Step 5: Confirm Carrier Email 📧", width="large")
                 def show_email_confirm():
                     st.write(f"Did you send the email to **{carrier_name}** with all attached documents?")
-                    st.caption("Checklist: Master Print File (or individual PDFs) + FDA Prior Notice")
+                    st.caption("Checklist: 4 attachments: CI, BOL, FDA, PL")
                     
                     st.markdown("---")
                     b1, b2 = st.columns(2)
@@ -1045,7 +1045,7 @@ if page == "Batches (Dashboard)":
                     
                     st.download_button("📥 Download Sales Invoice (SI)", pdf_si, f"SI-HRUS{base_id}.pdf", type="primary", use_container_width=True)
                     st.markdown("---")
-                    st.link_button("📧 Open Gmail to Compose", "https://mail.google.com/", use_container_width=True)
+                    st.link_button("📧 Open Gmail to Compose", "https://mail.google.com/mail/u/0/#inbox?compose=new", use_container_width=True)
                     
                     st.markdown("---")
                     b1, b2 = st.columns(2)
