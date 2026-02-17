@@ -963,6 +963,7 @@ if page == "Batches (Dashboard)":
             elif dialog_stage == 'step3':
                 @st.dialog("Step 3: Individual Files 📂", width="large")
                 def show_files_dialog():
+                    st.info(f"📧 Please email these documents to: **{carrier_name}**")
                     st.write("Download individual documents if needed.")
                     
                     c1, c2, c3 = st.columns(3)
