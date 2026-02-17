@@ -427,7 +427,7 @@ def draw_ci_page(pdf, doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_
     pdf.set_font("Helvetica", '', 10)
     pdf.cell(0, 5, "I declare that all information contained in this invoice to be true and correct.", 0, 1, 'L')
     
-    pdf.ln(15) 
+    pdf.ln(25) # Increased gap for signature
     y_sig_line = pdf.get_y()
     
     pdf.set_font("Helvetica", 'B', 10)
@@ -436,7 +436,7 @@ def draw_ci_page(pdf, doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_
     if sig_bytes:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp: tmp.write(sig_bytes); tmp_path = tmp.name
         try: 
-            pdf.image(tmp_path, x=10, y=y_sig_line - 15, w=40) 
+            pdf.image(tmp_path, x=10, y=y_sig_line - 20, w=40) 
         except: pass
         os.unlink(tmp_path)
 
@@ -921,10 +921,12 @@ if page == "Batches (Dashboard)":
             pdf_master = generate_master_print_file(df, b_inv_num, b_date, DEFAULT_SHIPPER, DEFAULT_IMPORTER, full_consignee_txt, b_notes, total_val, get_signature(), "Dean Turner", carrier_name, hbol, pallets, cartons, gross_weight)
             csv_data = generate_customscity_csv(df, b_inv_num, b_date, c_name, c_addr, c_city, c_state, c_zip, hbol, "FX" if "FedEx" in carrier_name else "GCYD")
             
-            # Individual files for Step 3
+            # Individual files
             pdf_ci = generate_ci_pdf("COMMERCIAL INVOICE", df, f"CI-HRUS{base_id}", b_date, DEFAULT_SHIPPER, DEFAULT_IMPORTER, full_consignee_txt, b_notes, total_val, get_signature(), "Dean Turner")
             pdf_pl = generate_pl_pdf(df, f"PL-HRUS{base_id}", b_date, DEFAULT_SHIPPER, DEFAULT_IMPORTER, full_consignee_txt, cartons)
             pdf_bol = generate_bol_pdf(df, b_inv_num, b_date, DEFAULT_SHIPPER, full_consignee_txt, carrier_name, hbol, pallets, cartons, gross_weight, get_signature())
+            pdf_po = generate_po_pdf(df, f"PO-HRUS{base_id}", b_date, DEFAULT_IMPORTER, DEFAULT_SHIPPER, full_consignee_txt, total_val)
+            pdf_si = generate_si_pdf(df, f"SI-HRUS{base_id}", b_date, DEFAULT_SHIPPER, DEFAULT_IMPORTER, full_consignee_txt, b_notes, total_val, get_signature(), "Dean Turner")
 
             # --- DIALOG WORKFLOW (STATE-BASED) ---
             dialog_stage = st.session_state.get(f'dialog_stage_{batch_id}', 'closed')
@@ -971,8 +973,8 @@ if page == "Batches (Dashboard)":
             elif dialog_stage == 'step3':
                 @st.dialog("Step 3: Individual Files 📂", width="large")
                 def show_files_dialog():
-                    st.error("⚠️ **STOP!** Do not send the email yet. You are missing the FDA Prior Notice (Step 4).")
                     st.info(f"📧 Plan to email these documents to: **{carrier_name}**")
+                    st.write("Download individual documents if needed.")
                     
                     c1, c2, c3 = st.columns(3)
                     with c1: st.download_button("Commercial Invoice", pdf_ci, f"CI-HRUS{base_id}.pdf", use_container_width=True)
@@ -980,6 +982,9 @@ if page == "Batches (Dashboard)":
                     with c3: st.download_button("Bill of Lading", pdf_bol, f"BOL-HRUS{base_id}.pdf", use_container_width=True)
                     
                     st.markdown("---")
+                    st.link_button("📧 Open Gmail to Compose", "https://mail.google.com/", use_container_width=True)
+                    st.markdown("---")
+                    
                     b1, b2 = st.columns(2)
                     with b1:
                         if st.button("⬅️ Back"):
@@ -1010,20 +1015,56 @@ if page == "Batches (Dashboard)":
                             st.session_state[f'dialog_stage_{batch_id}'] = 'step3'
                             st.rerun()
                     with b2:
-                        if st.button("✅ Confirmed Printed & All Done", type="primary", use_container_width=True):
-                            st.session_state[f'dialog_stage_{batch_id}'] = 'closed'
+                        if st.button("✅ Confirmed Printed - Next ➡️", type="primary", use_container_width=True):
+                            st.session_state[f'dialog_stage_{batch_id}'] = 'step5'
                             st.rerun()
                 show_fda_dialog()
+
+            elif dialog_stage == 'step5':
+                @st.dialog("Step 5: Confirm Carrier Email 📧", width="large")
+                def show_email_confirm():
+                    st.write(f"Did you send the email to **{carrier_name}** with all attached documents?")
+                    st.caption("Checklist: Master Print File (or individual PDFs) + FDA Prior Notice")
+                    
+                    st.markdown("---")
+                    b1, b2 = st.columns(2)
+                    with b1:
+                        if st.button("⬅️ Back"):
+                            st.session_state[f'dialog_stage_{batch_id}'] = 'step4'
+                            st.rerun()
+                    with b2:
+                        if st.button("Yes, Email Sent ✅", type="primary", use_container_width=True):
+                            st.session_state[f'dialog_stage_{batch_id}'] = 'step6'
+                            st.rerun()
+                show_email_confirm()
+
+            elif dialog_stage == 'step6':
+                @st.dialog("Step 6: Send to Finance 💰", width="large")
+                def show_finance_dialog():
+                    st.info("Please email the **Sales Invoice (SI)** to Airwallex email or Dean.")
+                    
+                    st.download_button("📥 Download Sales Invoice (SI)", pdf_si, f"SI-HRUS{base_id}.pdf", type="primary", use_container_width=True)
+                    st.markdown("---")
+                    st.link_button("📧 Open Gmail to Compose", "https://mail.google.com/", use_container_width=True)
+                    
+                    st.markdown("---")
+                    b1, b2 = st.columns(2)
+                    with b1:
+                        if st.button("⬅️ Back"):
+                            st.session_state[f'dialog_stage_{batch_id}'] = 'step5'
+                            st.rerun()
+                    with b2:
+                        if st.button("All Done (Finish Batch) 🎉", type="primary", use_container_width=True):
+                            st.session_state[f'dialog_stage_{batch_id}'] = 'closed'
+                            # Ideally, mark batch as completed here or allow user to edit
+                            st.rerun()
+                show_finance_dialog()
 
             # --- REGULAR DOWNLOAD SECTION (Backup access) ---
             st.markdown("### 📂 All Batch Documents")
             c1, c2, c3, c4, c5 = st.columns(5)
             with c1: st.download_button("CI PDF", pdf_master, f"MasterPrint_{base_id}.pdf", key=f"dl_master_{batch_id}")
             
-            # Additional individual files available if needed
-            pdf_po = generate_po_pdf(df, f"PO-HRUS{base_id}", b_date, DEFAULT_IMPORTER, DEFAULT_SHIPPER, full_consignee_txt, total_val)
-            pdf_si = generate_si_pdf(df, f"SI-HRUS{base_id}", b_date, DEFAULT_SHIPPER, DEFAULT_IMPORTER, full_consignee_txt, b_notes, total_val, get_signature(), "Dean Turner")
-
             with c2: st.download_button("PO PDF", pdf_po, f"PO-HRUS{base_id}.pdf", key=f"dl_po_{batch_id}")
             with c3: st.download_button("SI PDF", pdf_si, f"SI-HRUS{base_id}.pdf", key=f"dl_si_{batch_id}")
             with c4: st.download_button("PL PDF", pdf_pl, f"PL-HRUS{base_id}.pdf", key=f"dl_pl_{batch_id}")
