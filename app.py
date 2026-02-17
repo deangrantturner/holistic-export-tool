@@ -1062,13 +1062,13 @@ if page == "Batches (Dashboard)":
 
             # --- REGULAR DOWNLOAD SECTION (Backup access) ---
             st.markdown("### 📂 All Batch Documents")
-            c1, c2, c3, c4, c5 = st.columns(5)
+            c1, c2, c3, c4, c5, c6 = st.columns(6) # Updated to 6 columns
             with c1: st.download_button("CI PDF", pdf_master, f"MasterPrint_{base_id}.pdf", key=f"dl_master_{batch_id}")
-            
-            with c2: st.download_button("PO PDF", pdf_po, f"PO-HRUS{base_id}.pdf", key=f"dl_po_{batch_id}")
-            with c3: st.download_button("SI PDF", pdf_si, f"SI-HRUS{base_id}.pdf", key=f"dl_si_{batch_id}")
-            with c4: st.download_button("PL PDF", pdf_pl, f"PL-HRUS{base_id}.pdf", key=f"dl_pl_{batch_id}")
-            with c5: st.download_button("Customs CSV", csv_data, f"CustomsCity_{base_id}.csv", key=f"dl_csv_{batch_id}")
+            with c2: st.download_button("BOL PDF", pdf_bol, f"BOL-HRUS{base_id}.pdf", key=f"dl_bol_{batch_id}") # Added BOL Button
+            with c3: st.download_button("PO PDF", pdf_po, f"PO-HRUS{base_id}.pdf", key=f"dl_po_{batch_id}")
+            with c4: st.download_button("SI PDF", pdf_si, f"SI-HRUS{base_id}.pdf", key=f"dl_si_{batch_id}")
+            with c5: st.download_button("PL PDF", pdf_pl, f"PL-HRUS{base_id}.pdf", key=f"dl_pl_{batch_id}")
+            with c6: st.download_button("Customs CSV", csv_data, f"CustomsCity_{base_id}.csv", key=f"dl_csv_{batch_id}")
             
             # EMAIL CENTER (Previous Logic)
             st.markdown("---")
