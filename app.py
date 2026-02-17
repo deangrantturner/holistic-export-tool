@@ -932,12 +932,13 @@ if page == "Batches (Dashboard)":
             if dialog_stage == 'step1':
                 @st.dialog("Step 1: Print Documents 🖨️", width="large")
                 def show_print_dialog():
-                    st.write("Please print the Master File (Contains: 3x Commercial Invoice, 2x Bill of Lading)")
+                    st.warning("⚠️ **Action Required**: Please print the Master File below.")
+                    st.markdown("**Contains:** 3x Commercial Invoice, 2x Bill of Lading")
                     
                     st.download_button("📥 Download Master Print File (5 Pages)", pdf_master, f"MasterPrint_{base_id}.pdf", type="primary")
 
                     st.markdown("---")
-                    if st.button("Next: Customs Entry ➡️"):
+                    if st.button("✅ Confirmed Printed - Next: Customs Entry ➡️"):
                         st.session_state[f'dialog_stage_{batch_id}'] = 'step2'
                         st.rerun()
                 show_print_dialog()
@@ -947,24 +948,31 @@ if page == "Batches (Dashboard)":
                 def show_customs_dialog():
                     st.write("Download the CSV below and upload it to CustomsCity.")
                     
-                    # Columns for better layout
-                    d1, d2 = st.columns(2)
-                    with d1:
+                    c1, c2, c3 = st.columns([1, 0.2, 1])
+                    with c1:
                         st.download_button("1. Download CSV", csv_data, f"CustomsCity_{base_id}.csv", type="primary", use_container_width=True)
-                    with d2:
+                    with c2:
+                        st.markdown("<h2 style='text-align: center; margin:0; padding:0;'>➡️</h2>", unsafe_allow_html=True)
+                    with c3:
                         st.link_button("2. Open CustomsCity", "https://app.customscity.com/upload/document/", use_container_width=True)
 
                     st.markdown("---")
-                    if st.button("Next: Individual Files ➡️", use_container_width=True):
-                        st.session_state[f'dialog_stage_{batch_id}'] = 'step3'
-                        st.rerun()
+                    b1, b2 = st.columns(2)
+                    with b1:
+                        if st.button("⬅️ Back"):
+                            st.session_state[f'dialog_stage_{batch_id}'] = 'step1'
+                            st.rerun()
+                    with b2:
+                        if st.button("Next: Individual Files ➡️", use_container_width=True):
+                            st.session_state[f'dialog_stage_{batch_id}'] = 'step3'
+                            st.rerun()
                 show_customs_dialog()
 
             elif dialog_stage == 'step3':
                 @st.dialog("Step 3: Individual Files 📂", width="large")
                 def show_files_dialog():
-                    st.info(f"📧 Please email these documents to: **{carrier_name}**")
-                    st.write("Download individual documents if needed.")
+                    st.error("⚠️ **STOP!** Do not send the email yet. You are missing the FDA Prior Notice (Step 4).")
+                    st.info(f"📧 Plan to email these documents to: **{carrier_name}**")
                     
                     c1, c2, c3 = st.columns(3)
                     with c1: st.download_button("Commercial Invoice", pdf_ci, f"CI-HRUS{base_id}.pdf", use_container_width=True)
@@ -972,27 +980,39 @@ if page == "Batches (Dashboard)":
                     with c3: st.download_button("Bill of Lading", pdf_bol, f"BOL-HRUS{base_id}.pdf", use_container_width=True)
                     
                     st.markdown("---")
-                    if st.button("Next: FDA Prior Notice ➡️", type="primary", use_container_width=True):
-                        st.session_state[f'dialog_stage_{batch_id}'] = 'step4'
-                        st.rerun()
+                    b1, b2 = st.columns(2)
+                    with b1:
+                        if st.button("⬅️ Back"):
+                            st.session_state[f'dialog_stage_{batch_id}'] = 'step2'
+                            st.rerun()
+                    with b2:
+                        if st.button("Next: FDA Prior Notice ➡️", type="primary", use_container_width=True):
+                            st.session_state[f'dialog_stage_{batch_id}'] = 'step4'
+                            st.rerun()
                 show_files_dialog()
 
             elif dialog_stage == 'step4':
                 @st.dialog("Step 4: FDA Prior Notice 🏛️", width="large")
                 def show_fda_dialog():
-                    st.warning("⚠️ **Reminder:**")
+                    st.warning("⚠️ **Final Step:**")
                     st.markdown("""
-                    1. Go back to **CustomsCity**.
-                    2. Download the official **FDA Prior Notice** PDF.
-                    3. Attach it to your email along with the other documents.
+                    1. Go to **CustomsCity Dashboard**.
+                    2. **PRINT** the official **FDA Prior Notice** PDF.
+                    3. Attach it to your email to the carrier.
                     """)
                     
-                    st.link_button("Go to CustomsCity", "https://app.customscity.com/upload/document/", use_container_width=True)
+                    st.link_button("Go to CustomsCity Dashboard", "https://app.customscity.com/dashboard", use_container_width=True)
                     
                     st.markdown("---")
-                    if st.button("All Done ✅", type="primary", use_container_width=True):
-                        st.session_state[f'dialog_stage_{batch_id}'] = 'closed'
-                        st.rerun()
+                    b1, b2 = st.columns(2)
+                    with b1:
+                        if st.button("⬅️ Back"):
+                            st.session_state[f'dialog_stage_{batch_id}'] = 'step3'
+                            st.rerun()
+                    with b2:
+                        if st.button("✅ Confirmed Printed & All Done", type="primary", use_container_width=True):
+                            st.session_state[f'dialog_stage_{batch_id}'] = 'closed'
+                            st.rerun()
                 show_fda_dialog()
 
             # --- REGULAR DOWNLOAD SECTION (Backup access) ---
