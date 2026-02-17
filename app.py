@@ -372,6 +372,7 @@ def generate_ci_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_sh
     pdf.set_xy(100, y_mid); pdf.set_fill_color(245, 245, 245); pdf.rect(100, y_mid, 95, 30, 'F')
     pdf.set_xy(102, y_mid + 2); pdf.set_font("Helvetica", 'B', 9); pdf.cell(50, 5, "NOTES / BROKER / FDA:", 0, 1); pdf.set_xy(102, pdf.get_y()); pdf.set_font("Helvetica", '', 8); pdf.multi_cell(90, 4, notes); pdf.set_y(y_mid + 35)
     
+    # Updated Table Columns: Added UNIT WT
     w = [10, 40, 20, 20, 12, 15, 20, 25]; headers = ["QTY", "DESCRIPTION", "HTS #", "FDA", "ORIGIN", "UNIT WT", "UNIT ($)", "TOTAL ($)"]
     
     pdf.set_font("Helvetica", 'B', 7); pdf.set_fill_color(220, 220, 220)
@@ -427,11 +428,12 @@ def generate_ci_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_sh
 
     pdf.ln(2); pdf.set_font("Helvetica", 'B', 9); pdf.cell(sum(w[:-1]), 8, "TOTAL VALUE (USD):", 0, 0, 'R'); pdf.cell(w[-1], 8, f"${total_val:,.2f}", 1, 1, 'R')
     
-    pdf.ln(10)
+    # --- FIX: Ensure Signature is Below Text ---
+    pdf.ln(10) # Add vertical spacing before declaration
     pdf.set_font("Helvetica", '', 10)
     pdf.cell(0, 5, "I declare that all information contained in this invoice to be true and correct.", 0, 1, 'L')
     
-    pdf.ln(15) 
+    pdf.ln(15) # Add spacing specifically for the signature image
     y_sig_line = pdf.get_y()
     
     pdf.set_font("Helvetica", 'B', 10)
@@ -440,10 +442,13 @@ def generate_ci_pdf(doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_sh
     if sig_bytes:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp: tmp.write(sig_bytes); tmp_path = tmp.name
         try: 
+            # Place signature ABOVE the name line, but below the declaration text
             pdf.image(tmp_path, x=10, y=y_sig_line - 15, w=40) 
         except: pass
         os.unlink(tmp_path)
     return bytes(pdf.output())
+
+# ... (SI, PL, PO, BOL Generators same as before) ...
 
 def generate_si_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes, total_val, sig_bytes, signer_name):
     pdf = ProInvoice(); pdf.alias_nb_pages(); pdf.add_page(); pdf.set_auto_page_break(auto=False)
@@ -709,55 +714,61 @@ if page == "Batches (Dashboard)":
         batch_id = int(batch_row['id'])
         batch_data = json.loads(batch_row['data'])
         
-        st.info(f"**Working on:** {selected_batch_name} | **Last Saved:** {batch_row['updated_at']}")
-        
-        col_main, col_settings = st.columns([2, 1])
-        
-        with col_settings:
-            st.subheader("⚙️ Settings")
-            st.markdown("**Signature**")
-            saved_sig = get_setting('signature')
-            if saved_sig: 
-                st.success("Signature Loaded")
-                if st.button("🗑️ Clear Signature", key=f"clear_sig_{batch_id}"):
-                    clear_signature()
-                    st.rerun()
-            else: 
-                sig_up = st.file_uploader("Upload Sig", type=['png','jpg'])
-                if sig_up: 
-                    save_setting('signature', sig_up.getvalue())
-                    show_backup_prompt("sig_up")
-                    st.rerun()
+        # --- SESSION STATE FOR WORKFLOW ---
+        if f'batch_{batch_id}_status' not in st.session_state:
+            st.session_state[f'batch_{batch_id}_status'] = 'Edit'
             
-            st.markdown("**Carrier**")
-            c_opts = ["FX (FedEx)", "GCYD (Green City Courier)", "Other"]
-            current_carrier = batch_data.get('carrier', "FX (FedEx)")
-            if current_carrier not in c_opts: current_carrier = "Other"
-            sel_carrier = st.selectbox("Carrier", c_opts, index=c_opts.index(current_carrier) if current_carrier in c_opts else 2)
-            
-            carrier_code = "FX"; carrier_name = "FedEx (FX)"
-            if "GCYD" in sel_carrier: carrier_code = "GCYD"; carrier_name = "Green City Courier (GCYD)"
-            elif "Other" in sel_carrier: carrier_code = st.text_input("Code", value="XYZ"); carrier_name = st.text_input("Name", value="Custom Carrier")
+        status = st.session_state[f'batch_{batch_id}_status']
 
-        with col_main:
-            st.subheader("📝 Batch Details")
-            c1, c2 = st.columns(2)
-            with c1:
-                b_inv_num = st.text_input("Invoice #", value=batch_data.get('inv_number', ''))
-                b_date = st.date_input("Date", value=datetime.strptime(batch_data.get('inv_date', str(date.today())), "%Y-%m-%d"))
+        if status == 'Edit':
+            st.info(f"**Editing:** {selected_batch_name} | **Last Saved:** {batch_row['updated_at']}")
             
-            with c2:
-                st.markdown("**Consignee Details**")
-                c_name = st.text_input("Consignee Name", value=batch_data.get('cons_name', DEF_CONS_NAME))
-                c_addr = st.text_input("Street Address", value=batch_data.get('cons_addr', DEF_CONS_ADDR))
-                c3a, c3b, c3c = st.columns(3)
-                with c3a: c_city = st.text_input("City", value=batch_data.get('cons_city', DEF_CONS_CITY))
-                with c3b: c_state = st.text_input("State", value=batch_data.get('cons_state', DEF_CONS_STATE))
-                with c3c: c_zip = st.text_input("Zip Code", value=batch_data.get('cons_zip', DEF_CONS_ZIP))
-                c_other = st.text_input("Other Info (e.g. IRS #)", value=batch_data.get('cons_other', DEF_CONS_OTHER))
-                lines = [c_name, c_addr, f"{c_city}, {c_state} {c_zip}", c_other, "United States"]
-                full_consignee_txt = "\n".join([L for L in lines if L and L.strip()])
-                b_notes = st.text_area("Notes", value=batch_data.get('notes', ""), height=100)
+            col_main, col_settings = st.columns([2, 1])
+            with col_settings:
+                st.subheader("⚙️ Settings")
+                st.markdown("**Signature**")
+                saved_sig = get_setting('signature')
+                if saved_sig: 
+                    st.success("Signature Loaded")
+                    if st.button("🗑️ Clear Signature", key=f"clear_sig_{batch_id}"):
+                        clear_signature()
+                        st.rerun()
+                else: 
+                    sig_up = st.file_uploader("Upload Sig", type=['png','jpg'])
+                    if sig_up: 
+                        save_setting('signature', sig_up.getvalue())
+                        show_backup_prompt("sig_up")
+                        st.rerun()
+                
+                st.markdown("**Carrier**")
+                c_opts = ["FX (FedEx)", "GCYD (Green City Courier)", "Other"]
+                current_carrier = batch_data.get('carrier', "FX (FedEx)")
+                if current_carrier not in c_opts: current_carrier = "Other"
+                sel_carrier = st.selectbox("Carrier", c_opts, index=c_opts.index(current_carrier) if current_carrier in c_opts else 2)
+                
+                carrier_code = "FX"; carrier_name = "FedEx (FX)"
+                if "GCYD" in sel_carrier: carrier_code = "GCYD"; carrier_name = "Green City Courier (GCYD)"
+                elif "Other" in sel_carrier: carrier_code = st.text_input("Code", value="XYZ"); carrier_name = st.text_input("Name", value="Custom Carrier")
+
+            with col_main:
+                st.subheader("📝 Batch Details")
+                c1, c2 = st.columns(2)
+                with c1:
+                    b_inv_num = st.text_input("Invoice #", value=batch_data.get('inv_number', ''))
+                    b_date = st.date_input("Date", value=datetime.strptime(batch_data.get('inv_date', str(date.today())), "%Y-%m-%d"))
+                
+                with c2:
+                    st.markdown("**Consignee Details**")
+                    c_name = st.text_input("Consignee Name", value=batch_data.get('cons_name', DEF_CONS_NAME))
+                    c_addr = st.text_input("Street Address", value=batch_data.get('cons_addr', DEF_CONS_ADDR))
+                    c3a, c3b, c3c = st.columns(3)
+                    with c3a: c_city = st.text_input("City", value=batch_data.get('cons_city', DEF_CONS_CITY))
+                    with c3b: c_state = st.text_input("State", value=batch_data.get('cons_state', DEF_CONS_STATE))
+                    with c3c: c_zip = st.text_input("Zip Code", value=batch_data.get('cons_zip', DEF_CONS_ZIP))
+                    c_other = st.text_input("Other Info (e.g. IRS #)", value=batch_data.get('cons_other', DEF_CONS_OTHER))
+                    lines = [c_name, c_addr, f"{c_city}, {c_state} {c_zip}", c_other, "United States"]
+                    full_consignee_txt = "\n".join([L for L in lines if L and L.strip()])
+                    b_notes = st.text_area("Notes", value=batch_data.get('notes', ""), height=100)
 
             st.subheader("📦 Orders")
             cat_check = get_catalog()
@@ -814,63 +825,120 @@ if page == "Batches (Dashboard)":
                 try: df = pd.read_json(io.StringIO(saved_orders_json), orient='split')
                 except: st.error("Failed to load saved orders."); df = pd.DataFrame()
 
-        st.markdown("---")
-        if not df.empty:
-            df['Transfer Total'] = df['Quantity'] * df['Transfer Price (Unit)']
-            
-            df['FDA Code'] = df['FDA Code'].fillna("N/A")
-            df['country_of_origin'] = df['country_of_origin'].fillna("N/A")
-            df['product_id'] = df['product_id'].fillna("N/A")
-
-            consolidated = df.groupby(['product_id', 'HTS Code', 'Weight (lbs)', 'country_of_origin', 'FDA Code']).agg({
-                'Quantity': 'sum',
-                'Transfer Total': 'sum',
-                'Product Name': 'first',
-                'Description': 'first',
-                'Variant code / SKU': lambda x: ', '.join(x.unique()) if len(x.unique()) < 3 else 'VARIOUS'
-            }).reset_index()
-            
-            consolidated['Transfer Price (Unit)'] = consolidated['Transfer Total'] / consolidated['Quantity']
-            
-            edited_df = st.data_editor(consolidated, num_rows="dynamic", use_container_width=True,
-                column_config={"Transfer Price (Unit)": st.column_config.NumberColumn("Unit Price ($)", format="$%.2f"),
-                               "Transfer Total": st.column_config.NumberColumn("Total ($)", format="$%.2f")})
-            total_val = edited_df['Transfer Total'].sum()
-            st.metric("Total Value", f"${total_val:,.2f}")
-            
-            c_log1, c_log2, c_log3 = st.columns(3)
-            with c_log1: pallets = st.number_input("Pallets", value=batch_data.get('pallets', 1))
-            saved_cartons = batch_data.get('cartons', 1)
-            default_cartons = unique_orders_count if uploaded_file and unique_orders_count > 1 else saved_cartons
-            with c_log2: cartons = st.number_input("Cartons", value=default_cartons)
-            calc_w = (edited_df['Quantity'] * edited_df['Weight (lbs)']).sum()
-            saved_gw = batch_data.get('gross_weight', 0.0)
-            default_gw = calc_w + (pallets * 40) if saved_gw == 0.0 or uploaded_file else saved_gw
-            with c_log3: gross_weight = st.number_input("Gross Weight", value=float(default_gw))
-
-            st.markdown("---")
-            if st.button("💾 SAVE BATCH PROGRESS", type="primary"):
-                save_data = {
-                    "inv_number": b_inv_num, "inv_date": str(b_date), 
-                    "cons_name": c_name, "cons_addr": c_addr, "cons_city": c_city, "cons_state": c_state, "cons_zip": c_zip, "cons_other": c_other,
-                    "notes": b_notes, "carrier": sel_carrier,
-                    "pallets": pallets, "cartons": cartons, "gross_weight": gross_weight,
-                    "orders_json": edited_df.to_json(orient='split')
-                }
-                update_batch(batch_id, save_data)
-                st.success("✅ Saved! You can close the tab safely."); show_backup_prompt("batch_save")
+            if not df.empty:
+                df['Transfer Total'] = df['Quantity'] * df['Transfer Price (Unit)']
                 
-            st.subheader("🖨️ Documents")
+                df['FDA Code'] = df['FDA Code'].fillna("N/A")
+                df['country_of_origin'] = df['country_of_origin'].fillna("N/A")
+                df['product_id'] = df['product_id'].fillna("N/A")
+
+                consolidated = df.groupby(['product_id', 'HTS Code', 'Weight (lbs)', 'country_of_origin', 'FDA Code']).agg({
+                    'Quantity': 'sum',
+                    'Transfer Total': 'sum',
+                    'Product Name': 'first',
+                    'Description': 'first',
+                    'Variant code / SKU': lambda x: ', '.join(x.unique()) if len(x.unique()) < 3 else 'VARIOUS'
+                }).reset_index()
+                
+                consolidated['Transfer Price (Unit)'] = consolidated['Transfer Total'] / consolidated['Quantity']
+                
+                edited_df = st.data_editor(consolidated, num_rows="dynamic", use_container_width=True,
+                    column_config={"Transfer Price (Unit)": st.column_config.NumberColumn("Unit Price ($)", format="$%.2f"),
+                                   "Transfer Total": st.column_config.NumberColumn("Total ($)", format="$%.2f")})
+                total_val = edited_df['Transfer Total'].sum()
+                st.metric("Total Value", f"${total_val:,.2f}")
+                
+                c_log1, c_log2, c_log3 = st.columns(3)
+                with c_log1: pallets = st.number_input("Pallets", value=batch_data.get('pallets', 1))
+                saved_cartons = batch_data.get('cartons', 1)
+                default_cartons = unique_orders_count if uploaded_file and unique_orders_count > 1 else saved_cartons
+                with c_log2: cartons = st.number_input("Cartons", value=default_cartons)
+                calc_w = (edited_df['Quantity'] * edited_df['Weight (lbs)']).sum()
+                saved_gw = batch_data.get('gross_weight', 0.0)
+                default_gw = calc_w + (pallets * 40) if saved_gw == 0.0 or uploaded_file else saved_gw
+                with c_log3: gross_weight = st.number_input("Gross Weight", value=float(default_gw))
+
+                st.markdown("---")
+                if st.button("🚀 SUBMIT BATCH", type="primary"):
+                    save_data = {
+                        "inv_number": b_inv_num, "inv_date": str(b_date), 
+                        "cons_name": c_name, "cons_addr": c_addr, "cons_city": c_city, "cons_state": c_state, "cons_zip": c_zip, "cons_other": c_other,
+                        "notes": b_notes, "carrier": sel_carrier,
+                        "pallets": pallets, "cartons": cartons, "gross_weight": gross_weight,
+                        "orders_json": edited_df.to_json(orient='split')
+                    }
+                    update_batch(batch_id, save_data)
+                    st.session_state[f'batch_{batch_id}_status'] = 'Submitted'
+                    st.success("✅ Batch Submitted! Loading Documents..."); time.sleep(1); st.rerun()
+
+        elif status == 'Submitted':
+            st.success("✅ Batch Submitted Successfully!")
+            if st.button("✏️ Back to Edit Mode"):
+                st.session_state[f'batch_{batch_id}_status'] = 'Edit'
+                st.rerun()
+            
+            # --- LOAD DATA FOR GENERATION ---
+            df = pd.read_json(io.StringIO(batch_data.get('orders_json')), orient='split')
+            b_inv_num = batch_data.get('inv_number')
+            b_date = datetime.strptime(batch_data.get('inv_date'), "%Y-%m-%d").date()
             base_id = b_inv_num; hbol = f"HRUS{base_id}"
             
-            pdf_ci = generate_ci_pdf("COMMERCIAL INVOICE", edited_df, f"CI-HRUS{base_id}", b_date, DEFAULT_SHIPPER, DEFAULT_IMPORTER, full_consignee_txt, b_notes, total_val, get_signature(), "Dean Turner")
-            pdf_po = generate_po_pdf(edited_df, f"PO-HRUS{base_id}", b_date, DEFAULT_IMPORTER, DEFAULT_SHIPPER, full_consignee_txt, total_val)
-            pdf_si = generate_si_pdf(edited_df, f"SI-HRUS{base_id}", b_date, DEFAULT_SHIPPER, DEFAULT_IMPORTER, full_consignee_txt, b_notes, total_val, get_signature(), "Dean Turner")
-            pdf_pl = generate_pl_pdf(edited_df, f"PL-HRUS{base_id}", b_date, DEFAULT_SHIPPER, DEFAULT_IMPORTER, full_consignee_txt, cartons)
-            pdf_bol = generate_bol_pdf(edited_df, b_inv_num, b_date, DEFAULT_SHIPPER, full_consignee_txt, carrier_name, hbol, pallets, cartons, gross_weight, get_signature())
+            # Reconstruct variables for generation
+            c_name = batch_data.get('cons_name', DEF_CONS_NAME)
+            c_addr = batch_data.get('cons_addr', DEF_CONS_ADDR)
+            c_city = batch_data.get('cons_city', DEF_CONS_CITY)
+            c_state = batch_data.get('cons_state', DEF_CONS_STATE)
+            c_zip = batch_data.get('cons_zip', DEF_CONS_ZIP)
+            c_other = batch_data.get('cons_other', DEF_CONS_OTHER)
+            lines = [c_name, c_addr, f"{c_city}, {c_state} {c_zip}", c_other, "United States"]
+            full_consignee_txt = "\n".join([L for L in lines if L and L.strip()])
             
-            csv_data = generate_customscity_csv(edited_df, b_inv_num, b_date, c_name, c_addr, c_city, c_state, c_zip, hbol, carrier_code)
-            
+            b_notes = batch_data.get('notes')
+            carrier_name = batch_data.get('carrier')
+            pallets = batch_data.get('pallets')
+            cartons = batch_data.get('cartons')
+            gross_weight = batch_data.get('gross_weight')
+            total_val = df['Transfer Total'].sum()
+
+            pdf_ci = generate_ci_pdf("COMMERCIAL INVOICE", df, f"CI-HRUS{base_id}", b_date, DEFAULT_SHIPPER, DEFAULT_IMPORTER, full_consignee_txt, b_notes, total_val, get_signature(), "Dean Turner")
+            pdf_pl = generate_pl_pdf(df, f"PL-HRUS{base_id}", b_date, DEFAULT_SHIPPER, DEFAULT_IMPORTER, full_consignee_txt, cartons)
+            pdf_bol = generate_bol_pdf(df, b_inv_num, b_date, DEFAULT_SHIPPER, full_consignee_txt, carrier_name, hbol, pallets, cartons, gross_weight, get_signature())
+            pdf_po = generate_po_pdf(df, f"PO-HRUS{base_id}", b_date, DEFAULT_IMPORTER, DEFAULT_SHIPPER, full_consignee_txt, total_val)
+            pdf_si = generate_si_pdf(df, f"SI-HRUS{base_id}", b_date, DEFAULT_SHIPPER, DEFAULT_IMPORTER, full_consignee_txt, b_notes, total_val, get_signature(), "Dean Turner")
+            csv_data = generate_customscity_csv(df, b_inv_num, b_date, c_name, c_addr, c_city, c_state, c_zip, hbol, "FX" if "FedEx" in carrier_name else "GCYD")
+
+            # --- POPUP DIALOGS ---
+            @st.dialog("Step 1: Print Documents 🖨️", width="large")
+            def show_print_dialog():
+                st.write("Please print or save the following documents for the shipment.")
+                c1, c2, c3 = st.columns(3)
+                with c1: st.download_button("Commercial Invoice", pdf_ci, f"CI-HRUS{base_id}.pdf")
+                with c2: st.download_button("Packing List", pdf_pl, f"PL-HRUS{base_id}.pdf")
+                with c3: st.download_button("Bill of Lading", pdf_bol, f"BOL-HRUS{base_id}.pdf")
+                
+                st.markdown("---")
+                if st.button("Next: Customs Entry ➡️", type="primary"):
+                    st.session_state[f'show_customs_{batch_id}'] = True
+                    st.rerun()
+
+            @st.dialog("Step 2: Customs Entry 🛃", width="large")
+            def show_customs_dialog():
+                st.write("Download the CSV below and upload it to CustomsCity.")
+                st.download_button("📥 Download CustomsCity CSV", csv_data, f"CustomsCity_{base_id}.csv", type="primary")
+                st.markdown("---")
+                st.link_button("🚀 Go to CustomsCity / FDA Prior Notice", "https://app.customscity.com/")
+                if st.button("Done"):
+                    st.session_state[f'show_customs_{batch_id}'] = False
+                    st.rerun()
+
+            # Trigger Dialogs
+            if f'show_customs_{batch_id}' in st.session_state and st.session_state[f'show_customs_{batch_id}']:
+                show_customs_dialog()
+            else:
+                show_print_dialog()
+
+            # --- REGULAR DOWNLOAD SECTION (Backup access) ---
+            st.markdown("### 📂 All Batch Documents")
             c1, c2, c3, c4, c5 = st.columns(5)
             with c1: st.download_button("CI PDF", pdf_ci, f"CI-HRUS{base_id}.pdf", key=f"dl_ci_{batch_id}")
             with c2: st.download_button("PO PDF", pdf_po, f"PO-HRUS{base_id}.pdf", key=f"dl_po_{batch_id}")
@@ -878,11 +946,7 @@ if page == "Batches (Dashboard)":
             with c4: st.download_button("PL PDF", pdf_pl, f"PL-HRUS{base_id}.pdf", key=f"dl_pl_{batch_id}")
             with c5: st.download_button("BOL PDF", pdf_bol, f"BOL-HRUS{base_id}.pdf", key=f"dl_bol_{batch_id}")
             
-            c_csv_btn, c_csv_link = st.columns([1.5, 2])
-            with c_csv_btn: st.download_button("📥 CustomsCity CSV", csv_data, f"CustomsCity_{base_id}.csv", type="primary", key=f"dl_csv_{batch_id}")
-            with c_csv_link: st.markdown("""<div style="margin-top: 8px;"><a href="https://app.customscity.com/upload/document/" target="_blank" style="font-weight: 600; color: #6F4E37; text-decoration: none;">🚀 Upload to CustomsCity</a></div>""", unsafe_allow_html=True)
-            
-            # EMAIL CENTER (Omitted for brevity, same as previous)
+            # EMAIL CENTER (Previous Logic)
             st.markdown("---")
             st.subheader("📧 Email Center")
             with st.expander("⚙️ Sender Settings", expanded=True):
