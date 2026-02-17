@@ -600,7 +600,7 @@ def generate_pl_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, carton
 
     line_h = 5
     for _, row in df.iterrows():
-        d_row = [(str(int(row['Quantity'])), 'C'), (str(row['Description']), 'L')]
+        d_row = [(str(int(row['Quantity'])), 'C'), (str(row['Product Name']), 'L')]
         max_lines = 1
         for i, (txt, align) in enumerate(d_row):
             lines = get_lines(txt, w[i] - 2)
@@ -880,12 +880,14 @@ if page == "Batches (Dashboard)":
                     }
                     update_batch(batch_id, save_data)
                     st.session_state[f'batch_{batch_id}_status'] = 'Submitted'
+                    st.session_state[f'dialog_stage_{batch_id}'] = 'step1'  # Initialize Dialog State
                     st.success("✅ Batch Submitted! Loading Documents..."); time.sleep(1); st.rerun()
 
         elif status == 'Submitted':
             st.success("✅ Batch Submitted Successfully!")
             if st.button("✏️ Back to Edit Mode"):
                 st.session_state[f'batch_{batch_id}_status'] = 'Edit'
+                st.session_state[f'dialog_stage_{batch_id}'] = 'closed'
                 st.rerun()
             
             # --- LOAD DATA FOR GENERATION ---
@@ -914,45 +916,50 @@ if page == "Batches (Dashboard)":
             pdf_master = generate_master_print_file(df, b_inv_num, b_date, DEFAULT_SHIPPER, DEFAULT_IMPORTER, full_consignee_txt, b_notes, total_val, get_signature(), "Dean Turner", carrier_name, hbol, pallets, cartons, gross_weight)
             csv_data = generate_customscity_csv(df, b_inv_num, b_date, c_name, c_addr, c_city, c_state, c_zip, hbol, "FX" if "FedEx" in carrier_name else "GCYD")
 
-            # --- POPUP DIALOGS ---
-            @st.dialog("Step 1: Print Documents 🖨️", width="large")
-            def show_print_dialog():
-                st.write("Please print the Master File (Contains: 3x Commercial Invoice, 2x Bill of Lading)")
-                st.download_button("📥 Download Master Print File (5 Pages)", pdf_master, f"MasterPrint_{base_id}.pdf", type="primary")
-                st.markdown("---")
-                if st.button("Next: Customs Entry ➡️"):
-                    st.session_state[f'show_customs_{batch_id}'] = True
-                    st.rerun()
+            # --- DIALOG WORKFLOW (STATE-BASED) ---
+            dialog_stage = st.session_state.get(f'dialog_stage_{batch_id}', 'closed')
 
-            @st.dialog("Step 2: Customs Entry 🛃", width="large")
-            def show_customs_dialog():
-                st.write("Download the CSV below and upload it to CustomsCity.")
-                st.download_button("📥 Download CustomsCity CSV", csv_data, f"CustomsCity_{base_id}.csv", type="primary")
-                st.markdown("---")
-                st.link_button("🚀 Go to CustomsCity / FDA Prior Notice", "https://app.customscity.com/")
-                if st.button("Done"):
-                    st.session_state[f'show_customs_{batch_id}'] = False
-                    st.rerun()
-
-            # Trigger Dialogs
-            if f'show_customs_{batch_id}' in st.session_state and st.session_state[f'show_customs_{batch_id}']:
-                show_customs_dialog()
-            else:
+            if dialog_stage == 'step1':
+                @st.dialog("Step 1: Print Documents 🖨️", width="large")
+                def show_print_dialog():
+                    st.write("Please print the Master File (Contains: 3x Commercial Invoice, 2x Bill of Lading)")
+                    st.download_button("📥 Download Master Print File (5 Pages)", pdf_master, f"MasterPrint_{base_id}.pdf", type="primary")
+                    st.markdown("---")
+                    if st.button("Next: Customs Entry ➡️"):
+                        st.session_state[f'dialog_stage_{batch_id}'] = 'step2'
+                        st.rerun()
                 show_print_dialog()
 
-            # --- OPTIONAL: Individual Downloads Still Available ---
-            with st.expander("📂 Need individual files? Click here"):
-                c1, c2, c3, c4 = st.columns(4)
-                pdf_ci = generate_ci_pdf("COMMERCIAL INVOICE", df, f"CI-HRUS{base_id}", b_date, DEFAULT_SHIPPER, DEFAULT_IMPORTER, full_consignee_txt, b_notes, total_val, get_signature(), "Dean Turner")
-                pdf_pl = generate_pl_pdf(df, f"PL-HRUS{base_id}", b_date, DEFAULT_SHIPPER, DEFAULT_IMPORTER, full_consignee_txt, cartons)
-                pdf_bol = generate_bol_pdf(df, b_inv_num, b_date, DEFAULT_SHIPPER, full_consignee_txt, carrier_name, hbol, pallets, cartons, gross_weight, get_signature())
-                
-                with c1: st.download_button("CI PDF", pdf_ci, f"CI-HRUS{base_id}.pdf")
-                with c2: st.download_button("PL PDF", pdf_pl, f"PL-HRUS{base_id}.pdf")
-                with c3: st.download_button("BOL PDF", pdf_bol, f"BOL-HRUS{base_id}.pdf")
-                with c4: st.download_button("Customs CSV", csv_data, f"CustomsCity_{base_id}.csv")
+            elif dialog_stage == 'step2':
+                @st.dialog("Step 2: Customs Entry 🛃", width="large")
+                def show_customs_dialog():
+                    st.write("Download the CSV below and upload it to CustomsCity.")
+                    st.download_button("📥 Download CustomsCity CSV", csv_data, f"CustomsCity_{base_id}.csv", type="primary")
+                    st.markdown("---")
+                    st.link_button("🚀 Go to CustomsCity / FDA Prior Notice", "https://app.customscity.com/upload/document/")
+                    if st.button("Done"):
+                        st.session_state[f'dialog_stage_{batch_id}'] = 'closed'
+                        st.rerun()
+                show_customs_dialog()
+
+            # --- REGULAR DOWNLOAD SECTION (Backup access) ---
+            st.markdown("### 📂 All Batch Documents")
+            c1, c2, c3, c4, c5 = st.columns(5)
+            with c1: st.download_button("CI PDF", pdf_master, f"MasterPrint_{base_id}.pdf", key=f"dl_master_{batch_id}")
             
-            # EMAIL CENTER (Same as before)
+            # Additional individual files available if needed
+            pdf_ci = generate_ci_pdf("COMMERCIAL INVOICE", df, f"CI-HRUS{base_id}", b_date, DEFAULT_SHIPPER, DEFAULT_IMPORTER, full_consignee_txt, b_notes, total_val, get_signature(), "Dean Turner")
+            pdf_pl = generate_pl_pdf(df, f"PL-HRUS{base_id}", b_date, DEFAULT_SHIPPER, DEFAULT_IMPORTER, full_consignee_txt, cartons)
+            pdf_bol = generate_bol_pdf(df, b_inv_num, b_date, DEFAULT_SHIPPER, full_consignee_txt, carrier_name, hbol, pallets, cartons, gross_weight, get_signature())
+            pdf_po = generate_po_pdf(df, f"PO-HRUS{base_id}", b_date, DEFAULT_IMPORTER, DEFAULT_SHIPPER, full_consignee_txt, total_val)
+            pdf_si = generate_si_pdf(df, f"SI-HRUS{base_id}", b_date, DEFAULT_SHIPPER, DEFAULT_IMPORTER, full_consignee_txt, b_notes, total_val, get_signature(), "Dean Turner")
+
+            with c2: st.download_button("PO PDF", pdf_po, f"PO-HRUS{base_id}.pdf", key=f"dl_po_{batch_id}")
+            with c3: st.download_button("SI PDF", pdf_si, f"SI-HRUS{base_id}.pdf", key=f"dl_si_{batch_id}")
+            with c4: st.download_button("PL PDF", pdf_pl, f"PL-HRUS{base_id}.pdf", key=f"dl_pl_{batch_id}")
+            with c5: st.download_button("Customs CSV", csv_data, f"CustomsCity_{base_id}.csv", key=f"dl_csv_{batch_id}")
+            
+            # EMAIL CENTER (Previous Logic)
             st.markdown("---")
             st.subheader("📧 Email Center")
             # ... (Email code logic is unchanged, just hidden under this block)
