@@ -972,10 +972,28 @@ if page == "Batches (Dashboard)":
                     with c3: st.download_button("Bill of Lading", pdf_bol, f"BOL-HRUS{base_id}.pdf", use_container_width=True)
                     
                     st.markdown("---")
+                    if st.button("Next: FDA Prior Notice ➡️", type="primary", use_container_width=True):
+                        st.session_state[f'dialog_stage_{batch_id}'] = 'step4'
+                        st.rerun()
+                show_files_dialog()
+
+            elif dialog_stage == 'step4':
+                @st.dialog("Step 4: FDA Prior Notice 🏛️", width="large")
+                def show_fda_dialog():
+                    st.warning("⚠️ **Reminder:**")
+                    st.markdown("""
+                    1. Go back to **CustomsCity**.
+                    2. Download the official **FDA Prior Notice** PDF.
+                    3. Attach it to your email along with the other documents.
+                    """)
+                    
+                    st.link_button("Go to CustomsCity", "https://app.customscity.com/upload/document/", use_container_width=True)
+                    
+                    st.markdown("---")
                     if st.button("All Done ✅", type="primary", use_container_width=True):
                         st.session_state[f'dialog_stage_{batch_id}'] = 'closed'
                         st.rerun()
-                show_files_dialog()
+                show_fda_dialog()
 
             # --- REGULAR DOWNLOAD SECTION (Backup access) ---
             st.markdown("### 📂 All Batch Documents")
