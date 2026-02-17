@@ -941,10 +941,16 @@ if page == "Batches (Dashboard)":
                 @st.dialog("Step 2: Customs Entry 🛃", width="large")
                 def show_customs_dialog():
                     st.write("Download the CSV below and upload it to CustomsCity.")
-                    st.download_button("📥 Download CustomsCity CSV", csv_data, f"CustomsCity_{base_id}.csv", type="primary")
+                    
+                    # Columns for better layout
+                    d1, d2 = st.columns(2)
+                    with d1:
+                        st.download_button("1. Download CSV", csv_data, f"CustomsCity_{base_id}.csv", type="primary", use_container_width=True)
+                    with d2:
+                        st.link_button("2. Open CustomsCity", "https://app.customscity.com/upload/document/", use_container_width=True)
+
                     st.markdown("---")
-                    st.link_button("🚀 Go to CustomsCity / FDA Prior Notice", "https://app.customscity.com/upload/document/")
-                    if st.button("Done"):
+                    if st.button("Done", use_container_width=True):
                         st.session_state[f'dialog_stage_{batch_id}'] = 'closed'
                         st.rerun()
                 show_customs_dialog()
