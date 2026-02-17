@@ -920,6 +920,11 @@ if page == "Batches (Dashboard)":
             # --- GENERATE MASTER PRINT FILE ---
             pdf_master = generate_master_print_file(df, b_inv_num, b_date, DEFAULT_SHIPPER, DEFAULT_IMPORTER, full_consignee_txt, b_notes, total_val, get_signature(), "Dean Turner", carrier_name, hbol, pallets, cartons, gross_weight)
             csv_data = generate_customscity_csv(df, b_inv_num, b_date, c_name, c_addr, c_city, c_state, c_zip, hbol, "FX" if "FedEx" in carrier_name else "GCYD")
+            
+            # Individual files for Step 3
+            pdf_ci = generate_ci_pdf("COMMERCIAL INVOICE", df, f"CI-HRUS{base_id}", b_date, DEFAULT_SHIPPER, DEFAULT_IMPORTER, full_consignee_txt, b_notes, total_val, get_signature(), "Dean Turner")
+            pdf_pl = generate_pl_pdf(df, f"PL-HRUS{base_id}", b_date, DEFAULT_SHIPPER, DEFAULT_IMPORTER, full_consignee_txt, cartons)
+            pdf_bol = generate_bol_pdf(df, b_inv_num, b_date, DEFAULT_SHIPPER, full_consignee_txt, carrier_name, hbol, pallets, cartons, gross_weight, get_signature())
 
             # --- DIALOG WORKFLOW (STATE-BASED) ---
             dialog_stage = st.session_state.get(f'dialog_stage_{batch_id}', 'closed')
@@ -950,10 +955,26 @@ if page == "Batches (Dashboard)":
                         st.link_button("2. Open CustomsCity", "https://app.customscity.com/upload/document/", use_container_width=True)
 
                     st.markdown("---")
-                    if st.button("Done", use_container_width=True):
-                        st.session_state[f'dialog_stage_{batch_id}'] = 'closed'
+                    if st.button("Next: Individual Files ➡️", use_container_width=True):
+                        st.session_state[f'dialog_stage_{batch_id}'] = 'step3'
                         st.rerun()
                 show_customs_dialog()
+
+            elif dialog_stage == 'step3':
+                @st.dialog("Step 3: Individual Files 📂", width="large")
+                def show_files_dialog():
+                    st.write("Download individual documents if needed.")
+                    
+                    c1, c2, c3 = st.columns(3)
+                    with c1: st.download_button("Commercial Invoice", pdf_ci, f"CI-HRUS{base_id}.pdf", use_container_width=True)
+                    with c2: st.download_button("Packing List", pdf_pl, f"PL-HRUS{base_id}.pdf", use_container_width=True)
+                    with c3: st.download_button("Bill of Lading", pdf_bol, f"BOL-HRUS{base_id}.pdf", use_container_width=True)
+                    
+                    st.markdown("---")
+                    if st.button("All Done ✅", type="primary", use_container_width=True):
+                        st.session_state[f'dialog_stage_{batch_id}'] = 'closed'
+                        st.rerun()
+                show_files_dialog()
 
             # --- REGULAR DOWNLOAD SECTION (Backup access) ---
             st.markdown("### 📂 All Batch Documents")
@@ -961,9 +982,6 @@ if page == "Batches (Dashboard)":
             with c1: st.download_button("CI PDF", pdf_master, f"MasterPrint_{base_id}.pdf", key=f"dl_master_{batch_id}")
             
             # Additional individual files available if needed
-            pdf_ci = generate_ci_pdf("COMMERCIAL INVOICE", df, f"CI-HRUS{base_id}", b_date, DEFAULT_SHIPPER, DEFAULT_IMPORTER, full_consignee_txt, b_notes, total_val, get_signature(), "Dean Turner")
-            pdf_pl = generate_pl_pdf(df, f"PL-HRUS{base_id}", b_date, DEFAULT_SHIPPER, DEFAULT_IMPORTER, full_consignee_txt, cartons)
-            pdf_bol = generate_bol_pdf(df, b_inv_num, b_date, DEFAULT_SHIPPER, full_consignee_txt, carrier_name, hbol, pallets, cartons, gross_weight, get_signature())
             pdf_po = generate_po_pdf(df, f"PO-HRUS{base_id}", b_date, DEFAULT_IMPORTER, DEFAULT_SHIPPER, full_consignee_txt, total_val)
             pdf_si = generate_si_pdf(df, f"SI-HRUS{base_id}", b_date, DEFAULT_SHIPPER, DEFAULT_IMPORTER, full_consignee_txt, b_notes, total_val, get_signature(), "Dean Turner")
 
