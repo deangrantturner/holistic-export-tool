@@ -16,7 +16,7 @@ import math
 import random
 import json
 import time
-import base64  # Added for PDF embedding
+import base64
 
 # --- GLOBAL DEFAULTS ---
 DEFAULT_SHIPPER = """Holistic Roasters inc.
@@ -361,8 +361,7 @@ class ProInvoice(FPDF):
     def footer(self):
         self.set_y(-15); self.set_font('Helvetica', 'I', 8); self.cell(0, 10, f'Page {self.page_no()} of {{nb}}', 0, 0, 'R')
 
-# --- PDF DRAW FUNCTIONS (Refactored for reuse in Master Print) ---
-
+# --- PDF DRAW FUNCTIONS ---
 def draw_ci_page(pdf, doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes, total_val, sig_bytes, signer_name):
     pdf.add_page()
     pdf.set_auto_page_break(auto=False)
@@ -926,13 +925,18 @@ if page == "Batches (Dashboard)":
                 def show_print_dialog():
                     st.write("Please print the Master File (Contains: 3x Commercial Invoice, 2x Bill of Lading)")
                     
-                    # --- EMBED PDF VIEWER FOR PRINTING ---
+                    # --- EMBED PDF VIEWER FOR PRINTING (SAFER EMBED) ---
                     b64 = base64.b64encode(pdf_master).decode()
-                    pdf_display = f'<iframe src="data:application/pdf;base64,{b64}" width="100%" height="500" type="application/pdf"></iframe>'
+                    # Using <embed> often bypasses stricter iframe policies in some browsers
+                    pdf_display = f'<embed src="data:application/pdf;base64,{b64}" width="100%" height="500" type="application/pdf">'
                     st.markdown(pdf_display, unsafe_allow_html=True)
                     
+                    st.info("💡 If the preview above is blocked, please use the **Download** button below.")
+                    
+                    st.download_button("📥 Download Master Print File (5 Pages)", pdf_master, f"MasterPrint_{base_id}.pdf", type="primary")
+
                     st.markdown("---")
-                    if st.button("Next: Customs Entry ➡️", type="primary"):
+                    if st.button("Next: Customs Entry ➡️"):
                         st.session_state[f'dialog_stage_{batch_id}'] = 'step2'
                         st.rerun()
                 show_print_dialog()
