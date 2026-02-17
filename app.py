@@ -376,8 +376,10 @@ def draw_ci_page(pdf, doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_
     pdf.set_xy(100, y_mid); pdf.set_fill_color(245, 245, 245); pdf.rect(100, y_mid, 95, 30, 'F')
     pdf.set_xy(102, y_mid + 2); pdf.set_font("Helvetica", 'B', 9); pdf.cell(50, 5, "NOTES / BROKER / FDA:", 0, 1); pdf.set_xy(102, pdf.get_y()); pdf.set_font("Helvetica", '', 8); pdf.multi_cell(90, 4, notes); pdf.set_y(y_mid + 35)
     
-    # Table
-    w = [10, 40, 20, 20, 12, 15, 20, 25]; headers = ["QTY", "DESCRIPTION", "HTS #", "FDA", "ORIGIN", "UNIT WT", "UNIT ($)", "TOTAL ($)"]
+    # Updated Table Columns: Total Width ~190
+    w = [10, 65, 22, 20, 12, 18, 18, 25] 
+    headers = ["QTY", "DESCRIPTION", "HTS #", "FDA", "ORIGIN", "UNIT WT", "UNIT ($)", "TOTAL ($)"]
+    
     pdf.set_font("Helvetica", 'B', 7); pdf.set_fill_color(220, 220, 220)
     for i, h in enumerate(headers): pdf.cell(w[i], 8, h, 1, 0, 'C', fill=True)
     pdf.ln(); pdf.set_font("Helvetica", '', 7)
@@ -600,7 +602,7 @@ def generate_pl_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, carton
 
     line_h = 5
     for _, row in df.iterrows():
-        d_row = [(str(int(row['Quantity'])), 'C'), (str(row['Product Name']), 'L')]
+        d_row = [(str(int(row['Quantity'])), 'C'), (str(row['Description']), 'L')]
         max_lines = 1
         for i, (txt, align) in enumerate(d_row):
             lines = get_lines(txt, w[i] - 2)
