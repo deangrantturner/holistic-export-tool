@@ -999,10 +999,10 @@ if page == "Batches (Dashboard)":
             elif dialog_stage == 'step4':
                 @st.dialog("Step 4: FDA Prior Notice 🏛️", width="large")
                 def show_fda_dialog():
-                    st.warning("⚠️ **Final Step:**")
+                    st.warning("⚠️ **Action Required:**")
                     st.markdown("""
                     1. Go to **CustomsCity Dashboard**.
-                    2. **PRINT** the official **FDA Prior Notice** PDF.
+                    2. **Download and PRINT** the official **FDA Prior Notice** PDF.
                     3. Attach it to your email to the carrier.
                     """)
                     
