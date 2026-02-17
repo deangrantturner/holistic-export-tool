@@ -16,6 +16,7 @@ import math
 import random
 import json
 import time
+import base64  # Added for PDF embedding
 
 # --- GLOBAL DEFAULTS ---
 DEFAULT_SHIPPER = """Holistic Roasters inc.
@@ -376,10 +377,9 @@ def draw_ci_page(pdf, doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_
     pdf.set_xy(100, y_mid); pdf.set_fill_color(245, 245, 245); pdf.rect(100, y_mid, 95, 30, 'F')
     pdf.set_xy(102, y_mid + 2); pdf.set_font("Helvetica", 'B', 9); pdf.cell(50, 5, "NOTES / BROKER / FDA:", 0, 1); pdf.set_xy(102, pdf.get_y()); pdf.set_font("Helvetica", '', 8); pdf.multi_cell(90, 4, notes); pdf.set_y(y_mid + 35)
     
-    # Updated Table Columns: Total Width ~190
+    # Table
     w = [10, 65, 22, 20, 12, 18, 18, 25] 
     headers = ["QTY", "DESCRIPTION", "HTS #", "FDA", "ORIGIN", "UNIT WT", "UNIT ($)", "TOTAL ($)"]
-    
     pdf.set_font("Helvetica", 'B', 7); pdf.set_fill_color(220, 220, 220)
     for i, h in enumerate(headers): pdf.cell(w[i], 8, h, 1, 0, 'C', fill=True)
     pdf.ln(); pdf.set_font("Helvetica", '', 7)
@@ -602,7 +602,7 @@ def generate_pl_pdf(df, inv_num, inv_date, addr_from, addr_to, addr_ship, carton
 
     line_h = 5
     for _, row in df.iterrows():
-        d_row = [(str(int(row['Quantity'])), 'C'), (str(row['Description']), 'L')]
+        d_row = [(str(int(row['Quantity'])), 'C'), (str(row['Product Name']), 'L')]
         max_lines = 1
         for i, (txt, align) in enumerate(d_row):
             lines = get_lines(txt, w[i] - 2)
@@ -925,9 +925,14 @@ if page == "Batches (Dashboard)":
                 @st.dialog("Step 1: Print Documents 🖨️", width="large")
                 def show_print_dialog():
                     st.write("Please print the Master File (Contains: 3x Commercial Invoice, 2x Bill of Lading)")
-                    st.download_button("📥 Download Master Print File (5 Pages)", pdf_master, f"MasterPrint_{base_id}.pdf", type="primary")
+                    
+                    # --- EMBED PDF VIEWER FOR PRINTING ---
+                    b64 = base64.b64encode(pdf_master).decode()
+                    pdf_display = f'<iframe src="data:application/pdf;base64,{b64}" width="100%" height="500" type="application/pdf"></iframe>'
+                    st.markdown(pdf_display, unsafe_allow_html=True)
+                    
                     st.markdown("---")
-                    if st.button("Next: Customs Entry ➡️"):
+                    if st.button("Next: Customs Entry ➡️", type="primary"):
                         st.session_state[f'dialog_stage_{batch_id}'] = 'step2'
                         st.rerun()
                 show_print_dialog()
