@@ -235,9 +235,7 @@ def create_batch(name):
             if 'cons_other' in last_data: new_data['cons_other'] = last_data['cons_other']
             
             if 'notes' in last_data and last_data['notes']: new_data['notes'] = last_data['notes']
-            # Inherit carrier if it exists, otherwise use new default
             if 'carrier' in last_data: new_data['carrier'] = last_data['carrier']
-            
             if 'gross_weight' in last_data: new_data['gross_weight'] = last_data['gross_weight']
             if 'pallets' in last_data: new_data['pallets'] = last_data['pallets']
     except Exception as e:
@@ -364,7 +362,7 @@ class ProInvoice(FPDF):
     def footer(self):
         self.set_y(-15); self.set_font('Helvetica', 'I', 8); self.cell(0, 10, f'Page {self.page_no()} of {{nb}}', 0, 0, 'R')
 
-# --- PDF DRAW FUNCTIONS (Refactored for reuse in Master Print) ---
+# --- PDF DRAW FUNCTIONS ---
 
 def draw_ci_page(pdf, doc_type, df, inv_num, inv_date, addr_from, addr_to, addr_ship, notes, total_val, sig_bytes, signer_name):
     pdf.add_page()
@@ -921,7 +919,7 @@ if page == "Batches (Dashboard)":
             pdf_master = generate_master_print_file(df, b_inv_num, b_date, DEFAULT_SHIPPER, DEFAULT_IMPORTER, full_consignee_txt, b_notes, total_val, get_signature(), "Dean Turner", carrier_name, hbol, pallets, cartons, gross_weight)
             csv_data = generate_customscity_csv(df, b_inv_num, b_date, c_name, c_addr, c_city, c_state, c_zip, hbol, "FX" if "FedEx" in carrier_name else "GCYD")
             
-            # Individual files for Step 3
+            # Individual files
             pdf_ci = generate_ci_pdf("COMMERCIAL INVOICE", df, f"CI-HRUS{base_id}", b_date, DEFAULT_SHIPPER, DEFAULT_IMPORTER, full_consignee_txt, b_notes, total_val, get_signature(), "Dean Turner")
             pdf_pl = generate_pl_pdf(df, f"PL-HRUS{base_id}", b_date, DEFAULT_SHIPPER, DEFAULT_IMPORTER, full_consignee_txt, cartons)
             pdf_bol = generate_bol_pdf(df, b_inv_num, b_date, DEFAULT_SHIPPER, full_consignee_txt, carrier_name, hbol, pallets, cartons, gross_weight, get_signature())
@@ -982,9 +980,6 @@ if page == "Batches (Dashboard)":
                     with c3: st.download_button("Bill of Lading", pdf_bol, f"BOL-HRUS{base_id}.pdf", use_container_width=True)
                     
                     st.markdown("---")
-                    st.link_button("📧 Open Gmail to Compose", "https://mail.google.com/mail/u/0/#inbox?compose=new", use_container_width=True)
-                    st.markdown("---")
-                    
                     b1, b2 = st.columns(2)
                     with b1:
                         if st.button("⬅️ Back"):
@@ -1026,6 +1021,8 @@ if page == "Batches (Dashboard)":
                     st.write(f"Did you send the email to **{carrier_name}** with all attached documents?")
                     st.caption("Checklist: 4 attachments: CI, BOL, FDA, PL")
                     
+                    st.link_button("📧 Open Gmail to Compose", "https://mail.google.com/mail/u/0/#inbox?compose=new", use_container_width=True)
+                    
                     st.markdown("---")
                     b1, b2 = st.columns(2)
                     with b1:
@@ -1056,15 +1053,14 @@ if page == "Batches (Dashboard)":
                     with b2:
                         if st.button("All Done (Finish Batch) 🎉", type="primary", use_container_width=True):
                             st.session_state[f'dialog_stage_{batch_id}'] = 'closed'
-                            # Ideally, mark batch as completed here or allow user to edit
                             st.rerun()
                 show_finance_dialog()
 
             # --- REGULAR DOWNLOAD SECTION (Backup access) ---
             st.markdown("### 📂 All Batch Documents")
-            c1, c2, c3, c4, c5, c6 = st.columns(6) # Updated to 6 columns
+            c1, c2, c3, c4, c5, c6 = st.columns(6)
             with c1: st.download_button("CI PDF", pdf_master, f"MasterPrint_{base_id}.pdf", key=f"dl_master_{batch_id}")
-            with c2: st.download_button("BOL PDF", pdf_bol, f"BOL-HRUS{base_id}.pdf", key=f"dl_bol_{batch_id}") # Added BOL Button
+            with c2: st.download_button("BOL PDF", pdf_bol, f"BOL-HRUS{base_id}.pdf", key=f"dl_bol_{batch_id}")
             with c3: st.download_button("PO PDF", pdf_po, f"PO-HRUS{base_id}.pdf", key=f"dl_po_{batch_id}")
             with c4: st.download_button("SI PDF", pdf_si, f"SI-HRUS{base_id}.pdf", key=f"dl_si_{batch_id}")
             with c5: st.download_button("PL PDF", pdf_pl, f"PL-HRUS{base_id}.pdf", key=f"dl_pl_{batch_id}")
@@ -1073,4 +1069,71 @@ if page == "Batches (Dashboard)":
             # EMAIL CENTER (Previous Logic)
             st.markdown("---")
             st.subheader("📧 Email Center")
-            # ... (Email code logic is unchanged, just hidden under this block)
+            e1, e2 = st.columns(2)
+            with e1:
+                sender_email = st.text_input("Your Email (Gmail)", value="", key=f"snd_{batch_id}")
+                sender_pw = st.text_input("App Password", type="password", key=f"pw_{batch_id}")
+            with e2:
+                recip_email = st.text_input("Recipient Email", key=f"rec_{batch_id}")
+                subject = st.text_input("Subject", value=f"Holistic Roasters Export Documents - {b_inv_num}", key=f"sub_{batch_id}")
+            
+            body = st.text_area("Message Body", value="Hello,\n\nPlease find the attached export documents.\n\nThank you.", key=f"bod_{batch_id}")
+            if st.button("📤 Send Email with Documents"):
+                files_to_send = [
+                    {'name': f"MasterPrint_{base_id}.pdf", 'data': pdf_master},
+                    {'name': f"CustomsCity_{base_id}.csv", 'data': csv_data}
+                ]
+                success, msg_res = send_email_with_attachments(sender_email, sender_pw, recip_email, subject, body, files_to_send)
+                if success:
+                    st.success("Email sent successfully!")
+                else:
+                    st.error(f"Failed to send email: {msg_res}")
+
+# ==================== PAGE 2: CATALOG ====================
+elif page == "Catalog":
+    st.header("📚 Product Catalog")
+    
+    c1, c2 = st.columns([3, 1])
+    
+    with c2:
+        st.subheader("📥 Bulk Upload")
+        cat_csv = st.file_uploader("Upload Catalog CSV", type=['csv'])
+        if cat_csv:
+            try:
+                cdf = pd.read_csv(cat_csv)
+                upsert_catalog_from_df(cdf)
+                st.success(f"✅ Imported {len(cdf)} products!")
+                time.sleep(1)
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error reading CSV: {e}")
+        
+        st.markdown("---")
+        if st.button("🗑️ Clear Catalog", type="secondary"):
+            clear_catalog()
+            st.rerun()
+
+    with c1:
+        st.subheader("✏️ Edit Catalog")
+        cat_df = get_catalog()
+        
+        # If empty, provide a blank template row so it renders
+        if cat_df.empty:
+            cat_df = pd.DataFrame(columns=["sku", "product_name", "description", "hts_code", "fda_code", "weight_lbs", "unit_price", "country_of_origin", "product_id"])
+            
+        edited_cat = st.data_editor(cat_df, num_rows="dynamic", use_container_width=True)
+        
+        if st.button("💾 Save Catalog Changes", type="primary"):
+            upsert_catalog_from_df(edited_cat)
+            st.success("✅ Catalog updated successfully!")
+            time.sleep(1)
+            st.rerun()
+
+# ==================== PAGE 3: ARCHIVE ====================
+elif page == "Archive (History)":
+    st.header("🗄️ Invoice Archive")
+    hist_df = get_history()
+    if hist_df.empty:
+        st.info("No records found.")
+    else:
+        st.dataframe(hist_df, use_container_width=True)
