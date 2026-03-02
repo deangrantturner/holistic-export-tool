@@ -201,7 +201,6 @@ def create_batch(name):
     saved_notes = get_setting('default_notes')
     def_notes = saved_notes.decode('utf-8') if saved_notes else DEFAULT_NOTES
     saved_carrier = get_setting('default_carrier')
-    # CHANGED DEFAULT TO GCYD
     def_carrier = saved_carrier.decode('utf-8') if saved_carrier else "GCYD (Green City Courier)"
 
     new_data = {
@@ -980,6 +979,9 @@ if page == "Batches (Dashboard)":
                     with c3: st.download_button("Bill of Lading", pdf_bol, f"BOL-HRUS{base_id}.pdf", use_container_width=True)
                     
                     st.markdown("---")
+                    st.link_button("📧 Open Gmail to Compose", "https://mail.google.com/mail/u/0/#inbox?compose=new", use_container_width=True)
+                    st.markdown("---")
+                    
                     b1, b2 = st.columns(2)
                     with b1:
                         if st.button("⬅️ Back"):
@@ -1038,11 +1040,14 @@ if page == "Batches (Dashboard)":
             elif dialog_stage == 'step6':
                 @st.dialog("Step 6: Send to Finance 💰", width="large")
                 def show_finance_dialog():
-                    st.info("Please email the **Sales Invoice (SI)** to Airwallex email or Dean.")
+                    st.info("Please email the **Sales Invoice (SI)** to Airwallex (`holisticusa@bills.airwallex.com`).")
                     
                     st.download_button("📥 Download Sales Invoice (SI)", pdf_si, f"SI-HRUS{base_id}.pdf", type="primary", use_container_width=True)
                     st.markdown("---")
-                    st.link_button("📧 Open Gmail to Compose", "https://mail.google.com/mail/u/0/#inbox?compose=new", use_container_width=True)
+                    
+                    # Pre-filled Gmail Compose Link
+                    gmail_url = "https://mail.google.com/mail/?view=cm&fs=1&to=holisticusa@bills.airwallex.com"
+                    st.link_button("📧 Open Gmail (Airwallex pre-filled)", gmail_url, use_container_width=True)
                     
                     st.markdown("---")
                     b1, b2 = st.columns(2)
