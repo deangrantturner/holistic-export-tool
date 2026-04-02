@@ -1191,8 +1191,7 @@ def draw_intercompany_invoice():
         
         pdf.set_font('Arial', '', 10)
         pdf.set_xy(10, pdf.get_y())
-        pdf.multi_cell(85, 5, "Holistic Roasters Inc.\n3780 Rue Saint-Patrick\nMontreal, QC Canada H4E 1A2\n\nGST/HST: 78081 0917 RT0001\nQST: 1225279701TQ0001")
-        
+        pdf.multi_cell(85, 5, "Holistic Roasters Inc.\n3780 Rue Saint-Patrick\nMontreal, QC Canada H4E 1A2")        
         pdf.set_xy(105, pdf.get_y() - 25)
         pdf.multi_cell(85, 5, "Holistic Roasters USA\n30 N Gould St, STE R\nSheridan, WY 82801\nUnited States")
         pdf.ln(15)
