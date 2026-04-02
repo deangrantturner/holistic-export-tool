@@ -1153,7 +1153,6 @@ def draw_intercompany_invoice():
     st.write("Generate a monthly invoice for Holistic Roasters USA.")
 
     # 1. Automatic Unique Invoice Number Generator
-    # Uses the current date and time down to the second so it is always unique
     current_time = datetime.now()
     auto_inv_num = f"HR-{current_time.strftime('%Y%m%d-%H%M')}"
     
@@ -1184,19 +1183,25 @@ def draw_intercompany_invoice():
         pdf.cell(0, 6, 'Terms: Due on receipt', 0, 1, 'R')
         pdf.ln(10)
 
-        # Addresses
+        # Addresses Headers
         pdf.set_font('Arial', 'B', 10)
         pdf.cell(95, 6, 'FROM:', 0, 0, 'L')
         pdf.cell(95, 6, 'BILL TO:', 0, 1, 'L')
         
+        # Addresses
         pdf.set_font('Arial', '', 10)
         start_y = pdf.get_y()  # Remember the starting height
-
+        
         pdf.set_xy(10, start_y)
         pdf.multi_cell(85, 5, "Holistic Roasters Inc.\n3780 Rue Saint-Patrick\nMontreal, QC Canada H4E 1A2")
-
+        
         pdf.set_xy(105, start_y)  # Use the exact same starting height
         pdf.multi_cell(85, 5, "Holistic Roasters USA\n30 N Gould St, STE R\nSheridan, WY 82801\nUnited States")
+        
+        # --- THE FIX ---
+        # Force the cursor to move down past the addresses and back to the left margin
+        pdf.set_y(start_y + 25) 
+        pdf.set_x(10)
 
         # Table Header
         pdf.set_font('Arial', 'B', 9)
@@ -1210,17 +1215,21 @@ def draw_intercompany_invoice():
         pdf.set_font('Arial', '', 8)
         
         def add_row(activity, desc, amt):
-            start_y = pdf.get_y()
-            pdf.set_xy(50, start_y)
+            start_y_row = pdf.get_y()
+            pdf.set_xy(50, start_y_row)
             pdf.multi_cell(90, 5, desc, 1)
             end_y = pdf.get_y()
-            row_height = end_y - start_y
+            row_height = end_y - start_y_row
             
-            pdf.set_xy(10, start_y)
+            pdf.set_xy(10, start_y_row)
             pdf.cell(40, row_height, activity, 1, 0, 'L')
-            pdf.set_xy(140, start_y)
+            pdf.set_xy(140, start_y_row)
             pdf.cell(30, row_height, 'Zero-rated', 1, 0, 'C')
             pdf.cell(30, row_height, f"{amt:,.2f}", 1, 1, 'R')
+            
+            # Force the cursor to the bottom of the current row so they don't overlap
+            pdf.set_y(end_y)
+            pdf.set_x(10)
 
         add_row('Marketing Services', "Proportionate share of content creation, social media management, email marketing campaigns, website maintenance, and customer acquisition activities for U.S. market", marketing_amt)
         add_row('Brand License Fee', "License to use Holistic Roasters trademarks, packaging designs, and brand assets in the U.S. market per Brand License Agreement", brand_amt)
@@ -1257,7 +1266,6 @@ def draw_intercompany_invoice():
             email_subject = f"Invoice {invoice_number} - Holistic Roasters Inc."
             email_body = f"Hello,\n\nPlease find attached our latest invoice ({invoice_number}) for ${total_amount:,.2f} USD.\n\nThank you!"
             
-            # This safely formats the spaces and symbols for a web link
             gmail_link = f"https://mail.google.com/mail/?view=cm&fs=1&to={email_to}&su={urllib.parse.quote(email_subject)}&body={urllib.parse.quote(email_body)}"
             
             st.markdown(f'<a href="{gmail_link}" target="_blank"><button style="background-color:#ea4335; color:white; border:none; padding:8px 16px; border-radius:4px; cursor:pointer;">✉️ Compose in Gmail</button></a>', unsafe_allow_html=True)
