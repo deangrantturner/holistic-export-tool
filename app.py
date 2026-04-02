@@ -1236,7 +1236,7 @@ def draw_intercompany_invoice():
         pdf.cell(30, 8, f"${total_amount:,.2f}", 1, 1, 'R')
 
         # 3. Output to Streamlit & Provide Gmail Link
-        pdf_bytes = pdf.output(dest='S').encode('latin-1')
+        pdf_bytes = bytes(pdf.output())
         
         st.success("PDF Generated Successfully!")
         
