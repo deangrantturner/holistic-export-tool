@@ -1190,11 +1190,13 @@ def draw_intercompany_invoice():
         pdf.cell(95, 6, 'BILL TO:', 0, 1, 'L')
         
         pdf.set_font('Arial', '', 10)
-        pdf.set_xy(10, pdf.get_y())
-        pdf.multi_cell(85, 5, "Holistic Roasters Inc.\n3780 Rue Saint-Patrick\nMontreal, QC Canada H4E 1A2")        
-        pdf.set_xy(105, pdf.get_y() - 25)
+        start_y = pdf.get_y()  # Remember the starting height
+
+        pdf.set_xy(10, start_y)
+        pdf.multi_cell(85, 5, "Holistic Roasters Inc.\n3780 Rue Saint-Patrick\nMontreal, QC Canada H4E 1A2")
+
+        pdf.set_xy(105, start_y)  # Use the exact same starting height
         pdf.multi_cell(85, 5, "Holistic Roasters USA\n30 N Gould St, STE R\nSheridan, WY 82801\nUnited States")
-        pdf.ln(15)
 
         # Table Header
         pdf.set_font('Arial', 'B', 9)
