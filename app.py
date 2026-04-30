@@ -1273,3 +1273,48 @@ def draw_intercompany_invoice():
 
 # Add this line at the bottom of your app to display the module:
 draw_intercompany_invoice()
+
+# --- GOOGLE DRIVE SYNC MODULE ---
+def draw_drive_sync_system():
+    st.header("☁️ Team Database Sync")
+    st.write("Keep the team in sync using our shared Google Drive.")
+
+    # --- RESTORE SECTION ---
+    st.subheader("1. Download & Restore (Start of Day)")
+    st.markdown("📁 **Step 1:** Download the latest `.db` file from our [Shared Google Drive](https://drive.google.com/drive/folders/1esZ27LoOPerYX-jo7d_7aIdke7DJxpZO?usp=drive_link)")
+    
+    uploaded_file = st.file_uploader("📥 **Step 2:** Upload that downloaded file here", type=['db', 'sqlite'])
+    if uploaded_file is not None:
+        # This physically saves the uploaded file over the old database
+        with open("invoices.db", "wb") as f:
+            f.write(uploaded_file.getbuffer())
+        st.success("✅ Backup restored successfully! The app is now up to date.")
+
+    st.divider() # Draws a nice line to separate the sections
+
+    # --- BACKUP SECTION ---
+    st.subheader("2. Save & Upload (End of Day)")
+    st.info("🚨 **Team Rule:** Always upload your latest backup to the shared Drive when you finish working!")
+    
+    try:
+        with open("invoices.db", "rb") as file:
+            db_bytes = file.read()
+        
+        # Creates a filename with the current date/time
+        current_time = datetime.now().strftime("%Y-%m-%d_%H-%M")
+        backup_filename = f"export_hub_backup_{current_time}.db"
+
+        st.download_button(
+            label="⬇️ Step 1: Download Current Backup",
+            data=db_bytes,
+            file_name=backup_filename,
+            mime="application/octet-stream"
+        )
+        
+        st.markdown("📁 **Step 2:** Open our [Shared Google Drive](https://drive.google.com/drive/folders/1esZ27LoOPerYX-jo7d_7aIdke7DJxpZO?usp=drive_link) and drag your newly downloaded file into it.")
+        
+    except FileNotFoundError:
+        st.error("Database file not found.")
+
+# This line actually runs the code so it shows up on the page
+draw_drive_sync_system()
