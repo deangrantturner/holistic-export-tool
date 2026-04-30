@@ -333,24 +333,48 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --- BACKUP SIDEBAR ---
-st.sidebar.header("💾 Data Persistence")
+st.sidebar.header("☁️ Team Database Sync")
+
+# Keep your cool timestamp feature!
 if os.path.exists("invoices.db"):
     mod_time = os.path.getmtime("invoices.db")
     dt_mod = datetime.fromtimestamp(mod_time).strftime('%I:%M:%S %p')
     st.sidebar.caption(f"Last Saved: {dt_mod}")
-    with open("invoices.db", "rb") as f:
-        st.sidebar.download_button("📥 Backup Current State", data=f, file_name=f"holistic_backup_{datetime.now().strftime('%Y-%m-%d_%H%M')}.db", mime="application/x-sqlite3", key="sidebar_backup")
 
-st.sidebar.markdown("---")
-st.sidebar.info("Upload backup to restore Catalog & Defaults")
-uploaded_db = st.sidebar.file_uploader("📤 Restore Backup", type=["db"])
+# --- RESTORE SECTION ---
+st.sidebar.subheader("1. Download & Restore")
+st.sidebar.markdown("[📁 Open Shared Drive](https://drive.google.com/drive/folders/1esZ27LoOPerYX-jo7d_7aIdke7DJxpZO?usp=drive_link)")
+uploaded_db = st.sidebar.file_uploader("Upload Drive backup here:", type=["db", "sqlite"])
+
 if uploaded_db:
     if st.sidebar.button("⚠️ Confirm Restore"):
         try:
-            with open("invoices.db", "wb") as f: f.write(uploaded_db.getvalue())
-            st.sidebar.success("✅ Restored! Reloading page..."); time.sleep(1); st.rerun()
-        except Exception as e: st.sidebar.error(f"Error: {e}")
+            with open("invoices.db", "wb") as f: 
+                f.write(uploaded_db.getvalue())
+            st.sidebar.success("✅ Restored! Reloading page...")
+            time.sleep(1)
+            st.rerun()
+        except Exception as e: 
+            st.sidebar.error(f"Error: {e}")
 
+st.sidebar.divider()
+
+# --- BACKUP SECTION ---
+st.sidebar.subheader("2. Save & Upload")
+if os.path.exists("invoices.db"):
+    with open("invoices.db", "rb") as f:
+        st.sidebar.download_button(
+            label="📥 Step 1: Download File", 
+            data=f, 
+            file_name=f"holistic_backup_{datetime.now().strftime('%Y-%m-%d_%H%M')}.db", 
+            mime="application/x-sqlite3", 
+            key="sidebar_backup"
+        )
+st.sidebar.markdown("[📁 Step 2: Drag into Drive](https://drive.google.com/drive/folders/1esZ27LoOPerYX-jo7d_7aIdke7DJxpZO?usp=drive_link)")
+
+st.sidebar.markdown("---")
+
+# --- MAIN WORKFLOW ---
 st.title("☕ Holistic Roasters Export Hub")
 st.sidebar.header("📁 Workflow")
 page = st.sidebar.radio("Go to:", ["Batches (Dashboard)", "Catalog", "Archive (History)"])
@@ -1274,47 +1298,3 @@ def draw_intercompany_invoice():
 # Add this line at the bottom of your app to display the module:
 draw_intercompany_invoice()
 
-# --- GOOGLE DRIVE SYNC MODULE ---
-def draw_drive_sync_system():
-    st.header("☁️ Team Database Sync")
-    st.write("Keep the team in sync using our shared Google Drive.")
-
-    # --- RESTORE SECTION ---
-    st.subheader("1. Download & Restore (Start of Day)")
-    st.markdown("📁 **Step 1:** Download the latest `.db` file from our [Shared Google Drive](https://drive.google.com/drive/folders/1esZ27LoOPerYX-jo7d_7aIdke7DJxpZO?usp=drive_link)")
-    
-    uploaded_file = st.file_uploader("📥 **Step 2:** Upload that downloaded file here", type=['db', 'sqlite'])
-    if uploaded_file is not None:
-        # This physically saves the uploaded file over the old database
-        with open("invoices.db", "wb") as f:
-            f.write(uploaded_file.getbuffer())
-        st.success("✅ Backup restored successfully! The app is now up to date.")
-
-    st.divider() # Draws a nice line to separate the sections
-
-    # --- BACKUP SECTION ---
-    st.subheader("2. Save & Upload (End of Day)")
-    st.info("🚨 **Team Rule:** Always upload your latest backup to the shared Drive when you finish working!")
-    
-    try:
-        with open("invoices.db", "rb") as file:
-            db_bytes = file.read()
-        
-        # Creates a filename with the current date/time
-        current_time = datetime.now().strftime("%Y-%m-%d_%H-%M")
-        backup_filename = f"export_hub_backup_{current_time}.db"
-
-        st.download_button(
-            label="⬇️ Step 1: Download Current Backup",
-            data=db_bytes,
-            file_name=backup_filename,
-            mime="application/octet-stream"
-        )
-        
-        st.markdown("📁 **Step 2:** Open our [Shared Google Drive](https://drive.google.com/drive/folders/1esZ27LoOPerYX-jo7d_7aIdke7DJxpZO?usp=drive_link) and drag your newly downloaded file into it.")
-        
-    except FileNotFoundError:
-        st.error("Database file not found.")
-
-# This line actually runs the code so it shows up on the page
-draw_drive_sync_system()
